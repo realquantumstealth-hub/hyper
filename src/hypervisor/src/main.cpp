@@ -1,0 +1,174 @@
+#include "arch/arch.h"
+#include "hypercall/hypercall.h"
+#include <hypercall/hypercall_def.h>
+#include "memory_manager/memory_manager.h"
+#include "memory_manager/heap_manager.h"
+#include "slat/slat.h"
+#include "logs/logs.h"
+#include "structures/trap_frame.h"
+#include <ia32-doc/ia32.hpp>
+#include <intrin.h>
+#include <cstdint>
+
+#include "crt/crt.h"
+#include "interrupts/interrupts.h"
+#include "core/definitions.h"
+#include "cr3_cache/cr3_cache.h"
+
+typedef std::uint64_t(*vmexit_handler_t)(std::uint64_t a1, std::uint64_t a2, std::uint64_t a3, std::uint64_t a4);
+
+std::uint64_t g_hyperv_attachment_physical_base = 0;
+std::uint64_t g_hyperv_attachment_page_count = 0;
+volatile std::uint64_t g_process_in_hooked_view_cr3 = 0;
+std::uint64_t g_ntoskrnl_base_address = 0;
+
+std::uint64_t heap_physical_initial_base = 0;
+std::uint64_t heap_total_size_to_hide = 0;
+std::uint64_t uefi_boot_physical_base_address = 0;
+std::uint64_t uefi_boot_image_size = 0;
+
+namespace
+{
+    std::uint8_t* original_vmexit_handler = nullptr;
+}
+
+void clean_up_uefi_boot_image()
+{
+    std::uint8_t* mapped_uefi_boot_base = reinterpret_cast<std::uint8_t*>(memory_manager::map_host_physical(uefi_boot_physical_base_address));
+
+    crt::set_memory(mapped_uefi_boot_base, 0, uefi_boot_image_size);
+}
+
+void process_first_vmexit()
+{
+    static std::uint8_t is_first_vmexit = 1;
+
+    if (is_first_vmexit == 1)
+    {
+        slat::process_first_vmexit();
+        interrupts::set_up();
+
+        clean_up_uefi_boot_image();
+
+        is_first_vmexit = 0;
+    }
+
+    static std::uint8_t has_hidden_heap_pages = 0;
+    static std::uint64_t vmexit_count = 0;
+
+    if (has_hidden_heap_pages == 0 && 10000 <= ++vmexit_count)
+    {
+        std::uint64_t heap_physical_address = heap_physical_initial_base;
+        std::uint64_t heap_physical_end = heap_physical_initial_base + heap_total_size_to_hide;
+
+        has_hidden_heap_pages = slat::try_hide_heap_pages(heap_physical_address, heap_physical_end);
+    }
+}
+
+std::uint64_t do_vmexit_premature_return()
+{
+#ifdef _INTELMACHINE
+    return 0;
+#else
+    return __readgsqword(0);
+#endif
+}
+
+std::uint64_t vmexit_handler_detour(std::uint64_t a1, std::uint64_t a2, std::uint64_t a3, std::uint64_t a4)
+{
+    process_first_vmexit();
+
+    cr3_cache::try_cache_on_vmexit();
+
+    std::uint64_t exit_reason = arch::get_vmexit_reason();
+
+    if (arch::is_cpuid(exit_reason) == 1)
+    {
+#ifdef _INTELMACHINE
+        trap_frame_t* trap_frame = *reinterpret_cast<trap_frame_t**>(a1);
+#else
+        trap_frame_t* trap_frame = *reinterpret_cast<trap_frame_t**>(a2);
+#endif
+
+        hypercall_info_t hypercall_info = { .value = trap_frame->rcx };
+
+
+        if (hypercall_info.primary_key == hypercall_primary_key && hypercall_info.secondary_key == hypercall_secondary_key)
+        {
+            trap_frame_t original_trap_frame;
+            crt::copy_memory(&original_trap_frame, trap_frame, sizeof(trap_frame_t));
+
+#ifndef _INTELMACHINE
+            vmcb_t* const vmcb = arch::get_vmcb();
+
+            trap_frame->rax = vmcb->save_state.rax;
+            trap_frame->rsp = vmcb->save_state.rsp;
+#else
+            __vmx_vmread(VMCS_GUEST_RSP, &trap_frame->rsp);
+            // Note: For Intel, RAX and other GPRs are already in trap_frame from VM exit
+#endif
+
+            hypercall::process(hypercall_info, trap_frame, &original_trap_frame);
+
+#ifndef _INTELMACHINE
+            vmcb->save_state.rax = trap_frame->rax;
+            vmcb->save_state.rsp = trap_frame->rsp;
+#else
+            __vmx_vmwrite(VMCS_GUEST_RSP, trap_frame->rsp);
+#endif
+
+            return do_vmexit_premature_return();
+        }
+    }
+    else if (arch::is_slat_violation(exit_reason) == 1 && slat::process_slat_violation() == 1)
+    {
+        return do_vmexit_premature_return();
+    }
+    else if (arch::is_non_maskable_interrupt_exit(exit_reason) == 1)
+    {
+        interrupts::process_nmi();
+    }
+
+    return reinterpret_cast<vmexit_handler_t>(original_vmexit_handler)(a1, a2, a3, a4);
+}
+
+void entry_point(std::uint8_t** vmexit_handler_detour_out, std::uint8_t* original_vmexit_handler_routine, std::uint64_t heap_physical_base, std::uint64_t heap_physical_usable_base, std::uint64_t heap_total_size, std::uint64_t _uefi_boot_physical_base_address, std::uint32_t _uefi_boot_image_size,
+#ifdef _INTELMACHINE
+    std::uint64_t reserved_one, std::uint64_t ntoskrnl_base_address)
+{
+#else
+std::uint8_t* get_vmcb_gadget, std::uint64_t ntoskrnl_base_address)
+{
+    arch::parse_vmcb_gadget(get_vmcb_gadget);
+#endif
+    original_vmexit_handler = original_vmexit_handler_routine;
+    uefi_boot_physical_base_address = _uefi_boot_physical_base_address;
+    uefi_boot_image_size = _uefi_boot_image_size;
+
+    heap_physical_initial_base = heap_physical_base;
+    heap_total_size_to_hide = heap_total_size;
+    
+    g_ntoskrnl_base_address = ntoskrnl_base_address;
+    
+    heap_physical_initial_base = heap_physical_base;
+    heap_total_size_to_hide = heap_total_size;
+    
+    uefi_boot_physical_base_address = _uefi_boot_physical_base_address;
+    uefi_boot_image_size = _uefi_boot_image_size;
+    
+    g_hyperv_attachment_physical_base = heap_physical_base;
+    g_hyperv_attachment_page_count = heap_total_size / 0x1000;
+
+    *vmexit_handler_detour_out = reinterpret_cast<std::uint8_t*>(vmexit_handler_detour);
+
+    std::uint64_t heap_physical_end = heap_physical_base + heap_total_size;
+    std::uint64_t heap_usable_size = heap_physical_end - heap_physical_usable_base;
+
+    const std::uint64_t mapped_heap_usable_base = memory_manager::map_host_physical(heap_physical_usable_base);
+
+    heap_manager::set_up(mapped_heap_usable_base, heap_usable_size);
+
+    logs::set_up();
+    slat::set_up();
+    cr3_cache::initialize();
+}

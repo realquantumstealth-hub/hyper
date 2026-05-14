@@ -1,0 +1,9 @@
+﻿build/x64/Release/dump_vgk.sys.i64
+build/
+*.pdb
+*.obj
+*.ipdb
+*.iobj
+*.tlog
+*.log
+*.user

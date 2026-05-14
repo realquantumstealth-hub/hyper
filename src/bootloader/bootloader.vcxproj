@@ -1,0 +1,66 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\bootmgfw\bootmgfw.c" />
+    <ClCompile Include="src\disk\disk.c" />
+    <ClCompile Include="src\hooks\hooks.c" />
+    <ClCompile Include="src\hvloader\hvloader.c" />
+    <ClCompile Include="src\hyperv_attachment\hyperv_attachment.c" />
+    <ClCompile Include="src\image\image.c" />
+    <ClCompile Include="src\main.c" />
+    <ClCompile Include="src\memory_manager\memory_manager.c" />
+    <ClCompile Include="src\PeHashCompute.c" />
+    <ClCompile Include="src\TcgGuids.c" />
+    <ClCompile Include="src\TpmLogSpoofer.c" />
+    <ClCompile Include="src\TpmMeasurementFilter.c" />
+    <ClCompile Include="src\winload\winload.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ext\ia32-doc\ia32_compact.h" />
+    <ClInclude Include="src\bootmgfw\bootmgfw.h" />
+    <ClInclude Include="src\disk\disk.h" />
+    <ClInclude Include="src\hooks\hooks.h" />
+    <ClInclude Include="src\hvloader\hvloader.h" />
+    <ClInclude Include="src\hyperv_attachment\hyperv_attachment.h" />
+    <ClInclude Include="src\image\image.h" />
+    <ClInclude Include="src\memory_manager\memory_manager.h" />
+    <ClInclude Include="src\PeHashCompute.h" />
+    <ClInclude Include="src\structures\ntdef.h" />
+    <ClInclude Include="src\structures\relocation_entry.h" />
+    <ClInclude Include="src\structures\virtual_address.h" />
+    <ClInclude Include="src\TpmLogSpoofer.h" />
+    <ClInclude Include="src\TpmMeasurementFilter.h" />
+    <ClInclude Include="src\winload\winload.h" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{a8c03eeb-3fe7-4eab-b1f8-273a441bc8b9}</ProjectGuid>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="$(ProjectDir)\uefi.default.props" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <Import Project="$(ProjectDir)\uefi.props" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+  <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>$(ProjectDir)ext;C:\Users\Home\source\repos\VisualUefi\edk2\MdePkg\Include;C:\Users\Home\source\repos\VisualUefi\edk2\MdePkg\Include\X64;C:\Users\Home\source\repos\VisualUefi\edk2\ShellPkg\Include;C:\Users\Home\source\repos\VisualUefi\edk2\CryptoPkg\Include;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalDependencies>UefiDriverEntryPoint.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem Condition="'$(Configuration)|$(Platform)'=='Release|x64'">EFI Application</SubSystem>
+      <AdditionalLibraryDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\Home\source\repos\VisualUefi\EDK-II\x64\Release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+    <ClCompile>
+      <TreatWarningAsError Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</TreatWarningAsError>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

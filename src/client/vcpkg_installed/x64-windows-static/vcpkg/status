@@ -1,0 +1,42 @@
+Package: vcpkg-cmake-config
+Version: 2024-05-23
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 5f32804c7915d7da1cac54b275b93bfa5a14e4895e3f5fe21dc0d05aa769153f
+Status: install ok installed
+
+Package: vcpkg-cmake
+Version: 2024-04-23
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 0d207a6a8569a3a9de6c28f2b10b3fc9cd22d6565f3c73f04f080ae91a9d8b03
+Status: install ok installed
+
+Package: cli11
+Version: 2.5.0
+Depends: vcpkg-cmake:x64-windows, vcpkg-cmake-config:x64-windows
+Architecture: x64-windows-static
+Multi-Arch: same
+Abi: 7d54c02040f0fbe55131261eebd195be28d28e6dbbaf54995c1c729fb21504cc
+Description: CLI11 is a command line parser for C++11 and beyond that provides a rich feature set with a simple and intuitive interface.
+Status: install ok installed
+
+Package: zycore
+Version: 1.5.1
+Depends: vcpkg-cmake:x64-windows, vcpkg-cmake-config:x64-windows
+Architecture: x64-windows-static
+Multi-Arch: same
+Abi: 90b57cbf96125987e0b686c5d5863f25b8ba6352017ebb5be85d7e31d9ccdea4
+Description: Provides platform independent types, macros and a fallback for environments without LibC.
+Status: install ok installed
+
+Package: zydis
+Version: 4.1.1
+Port-Version: 1
+Depends: vcpkg-cmake:x64-windows, vcpkg-cmake-config:x64-windows, zycore
+Architecture: x64-windows-static
+Multi-Arch: same
+Abi: 125b47a5b7a33013ac1ab68d24d11e60dba6d44e4d10cfe04c5041bc85f886fa
+Description: Fast and lightweight x86/x86-64 disassembler library.
+Status: install ok installed
+
