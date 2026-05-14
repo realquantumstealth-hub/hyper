@@ -1,12 +1,10 @@
 ﻿# hyper
 
-## Language / 语言
+## Languages
 
-| Language | Jump |
-| --- | --- |
-| 简体中文 | [查看中文](#中文说明) |
-| English | [View English](#english) |
+[English](#english) · [中文](#中文说明) · 日本語 · 한국어 · Русский · Українська · Tiếng Việt
 
+> 日本語 / 한국어 / Русский / Українська / Tiếng Việt versions: Coming soon.
 ## 中文说明
 
 `hyper` 是一个多组件反作弊研究工程，项目按职责分层，主要包含：
@@ -54,6 +52,7 @@
 This project is for security research and defensive technical discussion only, and must not be used for unauthorized purposes.
 
 **Some keys, certificates, executable chains, and bypass/injection deliverables are sensitive and are not suitable for public release on GitHub. If you need deeper discussion, please contact our official Discord.**
+
 
 
 
