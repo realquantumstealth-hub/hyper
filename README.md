@@ -1,6 +1,11 @@
 ﻿# hyper
 
-[中文](#中文说明) | [English](#english)
+## Language / 语言
+
+| Language | Jump |
+| --- | --- |
+| 简体中文 | [查看中文](#中文说明) |
+| English | [View English](#english) |
 
 ## 中文说明
 
@@ -49,5 +54,6 @@
 This project is for security research and defensive technical discussion only, and must not be used for unauthorized purposes.
 
 **Some keys, certificates, executable chains, and bypass/injection deliverables are sensitive and are not suitable for public release on GitHub. If you need deeper discussion, please contact our official Discord.**
+
 
 
