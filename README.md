@@ -2,15 +2,15 @@
 
 ## Languages
 
-[English](#english) · [中文](#中文说明) · 日本語 · 한국어 · Русский · Українська · Tiếng Việt
+[English](#en) · [中文](#zh) · [日本語](#ja) · [한국어](#ko) · [Русский](#ru) · [Українська](#uk) · [Tiếng Việt](#vi)
 
-> 日本語 / 한국어 / Русский / Українська / Tiếng Việt versions: Coming soon.
+<a id="zh"></a>
 ## 中文说明
 
-`hyper` 是一个多组件反作弊研究工程，项目按职责分层，主要包含：
+`hyper` 是一个多组件反作弊研究工程，按职责分层，主要包含：
 
 - `src/bootloader/`：启动阶段组件（UEFI 相关）
-- `src/hypervisor/`：核心低层逻辑
+- `src/hypervisor/`：核心底层逻辑
 - `src/client/`：用户态客户端控制层
 - `src/common/`：共享结构与协议定义
 - `docs/`：架构与结构文档
@@ -26,10 +26,11 @@
 
 本项目仅用于安全研究与防御技术讨论，不用于任何未授权用途。
 
-**由于部分密钥、证书、可执行链路、绕过/注入成品等属敏感信息不方便在github上公开，需要或想交流的同伴可以联系我们官方discord进行深入探讨。**
+由于部分密钥、证书、可执行链路、绕过/注入成品等属敏感信息不方便在 GitHub 上公开，需要或想交流的同伴可以联系我们官方 Discord 进行深入探讨。
 
 ---
 
+<a id="en"></a>
 ## English
 
 `hyper` is a multi-component anti-cheat research project with layered architecture:
@@ -51,8 +52,134 @@
 
 This project is for security research and defensive technical discussion only, and must not be used for unauthorized purposes.
 
-**Some keys, certificates, executable chains, and bypass/injection deliverables are sensitive and are not suitable for public release on GitHub. If you need deeper discussion, please contact our official Discord.**
+Some keys, certificates, executable chains, and bypass/injection deliverables are sensitive and are not suitable for public release on GitHub. For deeper discussion, please contact our official Discord.
 
+---
 
+<a id="ja"></a>
+## 日本語
 
+`hyper` は複数コンポーネントで構成されたアンチチート研究プロジェクトです。主な構成は以下です。
 
+- `src/bootloader/`：起動段階コンポーネント（UEFI 関連）
+- `src/hypervisor/`：中核となる低レベルロジック
+- `src/client/`：ユーザーモード制御レイヤー
+- `src/common/`：共通構造体とプロトコル定義
+- `docs/`：アーキテクチャ文書
+- `tests/`：基本テスト
+
+### 研究目的
+
+- bootloader / hypervisor / client のレイヤー連携の検証
+- インターフェース、メモリ管理、割り込み処理の設計研究
+- ビルドチェーンとモジュール化デバッグの検証
+
+### コンプライアンス
+
+本プロジェクトはセキュリティ研究および防御技術の議論のみを目的とします。
+
+鍵・証明書・実行チェーン・バイパス/インジェクション成果物などの機微情報は GitHub で公開しません。詳細は公式 Discord へご連絡ください。
+
+---
+
+<a id="ko"></a>
+## 한국어
+
+`hyper`는 다중 컴포넌트 구조의 안티치트 연구 프로젝트입니다. 주요 구성은 다음과 같습니다.
+
+- `src/bootloader/`: 부팅 단계 컴포넌트(UEFI 관련)
+- `src/hypervisor/`: 핵심 저수준 로직
+- `src/client/`: 사용자 모드 제어 계층
+- `src/common/`: 공용 구조체 및 프로토콜 정의
+- `docs/`: 아키텍처 문서
+- `tests/`: 기본 테스트
+
+### 연구 목표
+
+- bootloader / hypervisor / client 계층 협업 구조 연구
+- 인터페이스, 메모리 관리, 인터럽트 처리 모듈 연구
+- 빌드 체인 및 모듈형 디버깅 워크플로우 연구
+
+### 준수 및 범위
+
+본 프로젝트는 보안 연구 및 방어 기술 논의 목적에만 사용됩니다.
+
+키, 인증서, 실행 체인, 바이패스/인젝션 산출물 등 민감 정보는 GitHub에 공개하지 않습니다. 자세한 논의는 공식 Discord로 문의해 주세요.
+
+---
+
+<a id="ru"></a>
+## Русский
+
+`hyper` — много-компонентный исследовательский anti-cheat проект с послойной архитектурой:
+
+- `src/bootloader/`: компонент стадии загрузки (UEFI)
+- `src/hypervisor/`: ядро низкоуровневой логики
+- `src/client/`: user-mode слой управления
+- `src/common/`: общие структуры и определения протоколов
+- `docs/`: архитектурная документация
+- `tests/`: базовые тесты
+
+### Цели исследования
+
+- Изучение взаимодействия слоев bootloader / hypervisor / client
+- Изучение структуры модулей интерфейса, памяти и прерываний
+- Изучение сборочной цепочки и модульной отладки
+
+### Соответствие и ограничения
+
+Проект предназначен только для исследований безопасности и обсуждения defensive-подходов.
+
+Ключи, сертификаты, исполняемые цепочки и готовые bypass/injection материалы не публикуются на GitHub. Для подробного обсуждения используйте наш официальный Discord.
+
+---
+
+<a id="uk"></a>
+## Українська
+
+`hyper` — багатокомпонентний дослідницький anti-cheat проєкт із шаровою архітектурою:
+
+- `src/bootloader/`: компонент етапу завантаження (UEFI)
+- `src/hypervisor/`: ядро низькорівневої логіки
+- `src/client/`: user-mode шар керування
+- `src/common/`: спільні структури й протоколи
+- `docs/`: архітектурна документація
+- `tests/`: базові тести
+
+### Мета дослідження
+
+- Вивчення взаємодії шарів bootloader / hypervisor / client
+- Вивчення модулів інтерфейсу, керування пам’яттю та обробки переривань
+- Вивчення пайплайна збірки та модульного налагодження
+
+### Відповідність і межі
+
+Проєкт призначено лише для безпекових досліджень і defensive-обговорень.
+
+Ключі, сертифікати, виконувані ланцюги та готові bypass/injection матеріали не публікуються на GitHub. Для детального обговорення звертайтеся в наш офіційний Discord.
+
+---
+
+<a id="vi"></a>
+## Tiếng Việt
+
+`hyper` là dự án nghiên cứu anti-cheat đa thành phần với kiến trúc phân lớp:
+
+- `src/bootloader/`: thành phần giai đoạn khởi động (liên quan UEFI)
+- `src/hypervisor/`: logic mức thấp cốt lõi
+- `src/client/`: lớp điều khiển user-mode
+- `src/common/`: cấu trúc và định nghĩa giao thức dùng chung
+- `docs/`: tài liệu kiến trúc
+- `tests/`: bài kiểm thử cơ bản
+
+### Mục tiêu nghiên cứu
+
+- Nghiên cứu phối hợp giữa các lớp bootloader / hypervisor / client
+- Nghiên cứu tổ chức mô-đun giao diện, bộ nhớ và xử lý ngắt
+- Nghiên cứu chuỗi build và quy trình debug theo mô-đun
+
+### Tuân thủ và phạm vi
+
+Dự án chỉ dùng cho nghiên cứu bảo mật và thảo luận kỹ thuật phòng thủ.
+
+Một số khóa, chứng chỉ, chuỗi thực thi và sản phẩm bypass/injection là thông tin nhạy cảm nên không công khai trên GitHub. Nếu cần trao đổi sâu hơn, vui lòng liên hệ Discord chính thức của chúng tôi.
