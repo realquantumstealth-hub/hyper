@@ -16,6 +16,33 @@
 - `docs/`：架构与结构文档
 - `tests/`：基础测试样例
 
+### 反作弊视角
+
+`hyper` 的价值在于提供“启动链 -> 低层执行层 -> 用户态控制层”的完整研究面，可用于评估更早期、更底层的对抗面与检测面：
+
+- 启动阶段完整性：研究引导阶段对象替换、路径重定向、早期注入迹象
+- 运行阶段控制：研究低层内存视图、执行流与中断处理的可观测性
+- 用户态编排：研究控制指令、采样任务和反馈回路的安全性
+
+### 可能作用与用途（防守用途）
+
+- 构建分层防线：把检测点前移到 boot/early runtime
+- 设计跨域关联检测：把 boot 事件与 runtime 行为关联
+- 评估检测鲁棒性：验证单点检测在跨层对抗下的失效率
+
+### 核心原理（高层）
+
+1. 启动链介入：在系统早期阶段建立受控加载与校验路径
+2. 低层监控：通过 hypervisor 层能力观察内存与执行状态
+3. 协议通信：client 与低层通过统一协议交换采样与控制指令
+4. 分析反馈：将低层观测结果回送到用户态用于策略决策
+
+### 防守研究建议
+
+- 把 boot 证据和 runtime 证据统一入库进行关联分析
+- 对关键路径建立基线（中断、页表、关键模块映射）
+- 将“是否异常”从单点判断升级为多信号评分模型
+
 ### 研究目标
 
 - 研究 bootloader / hypervisor / client 的分层协作
@@ -41,6 +68,33 @@
 - `src/common/`: shared structures and protocol definitions
 - `docs/`: architecture and structure documentation
 - `tests/`: basic test samples
+
+### Anti-Cheat Perspective
+
+`hyper` is valuable because it exposes a full research surface from boot chain to low-level runtime to user-mode control:
+
+- Boot-stage integrity: investigate replacement, path redirection, and early-stage tampering indicators
+- Runtime control plane: analyze observability of memory views, execution flow, and interrupt handling
+- User-mode orchestration: evaluate security of command, sampling, and feedback pipelines
+
+### Potential Value and Use Cases (Defensive)
+
+- Build layered defenses with earlier detection points (boot/early runtime)
+- Correlate boot events with runtime behavior
+- Evaluate robustness of single-point detection under cross-layer adversarial conditions
+
+### Core Principles (High Level)
+
+1. Boot-chain intervention to establish controlled load and validation paths
+2. Low-level monitoring through hypervisor-layer observability
+3. Unified protocol communication between client and low-level components
+4. Feedback analysis in user-mode for strategy decisions
+
+### Defensive Research Recommendations
+
+- Store and correlate boot evidence with runtime evidence
+- Baseline critical paths (interrupts, page tables, critical mappings)
+- Move from binary alerts to multi-signal scoring
 
 ### Research Focus
 
@@ -183,3 +237,4 @@ Some keys, certificates, executable chains, and bypass/injection deliverables ar
 Dự án chỉ dùng cho nghiên cứu bảo mật và thảo luận kỹ thuật phòng thủ.
 
 Một số khóa, chứng chỉ, chuỗi thực thi và sản phẩm bypass/injection là thông tin nhạy cảm nên không công khai trên GitHub. Nếu cần trao đổi sâu hơn, vui lòng liên hệ Discord chính thức của chúng tôi.
+
