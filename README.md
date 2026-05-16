@@ -1,5 +1,7 @@
 ﻿# hyper
 
+> **Official Forum / 官方论坛**: https://discord.gg/qslab
+
 ## Languages
 
 [English](#en) · [中文](#zh) · [日本語](#ja) · [한국어](#ko) · [Русский](#ru) · [Українська](#uk) · [Tiếng Việt](#vi)
