@@ -1,242 +1,645 @@
-﻿# hyper
+# hyper
 
 > **Official Forum / 官方论坛**: https://discord.gg/qslab
 
 ## Languages
 
-[English](#en) · [中文](#zh) · [日本語](#ja) · [한국어](#ko) · [Русский](#ru) · [Українська](#uk) · [Tiếng Việt](#vi)
-
-<a id="zh"></a>
-## 中文说明
-
-`hyper` 是一个多组件反作弊研究工程，按职责分层，主要包含：
-
-- `src/bootloader/`：启动阶段组件（UEFI 相关）
-- `src/hypervisor/`：核心底层逻辑
-- `src/client/`：用户态客户端控制层
-- `src/common/`：共享结构与协议定义
-- `docs/`：架构与结构文档
-- `tests/`：基础测试样例
-
-### 反作弊视角
-
-`hyper` 的价值在于提供“启动链 -> 低层执行层 -> 用户态控制层”的完整研究面，可用于评估更早期、更底层的对抗面与检测面：
-
-- 启动阶段完整性：研究引导阶段对象替换、路径重定向、早期注入迹象
-- 运行阶段控制：研究低层内存视图、执行流与中断处理的可观测性
-- 用户态编排：研究控制指令、采样任务和反馈回路的安全性
-
-### 可能作用与用途（防守用途）
-
-- 构建分层防线：把检测点前移到 boot/early runtime
-- 设计跨域关联检测：把 boot 事件与 runtime 行为关联
-- 评估检测鲁棒性：验证单点检测在跨层对抗下的失效率
-
-### 核心原理（高层）
-
-1. 启动链介入：在系统早期阶段建立受控加载与校验路径
-2. 低层监控：通过 hypervisor 层能力观察内存与执行状态
-3. 协议通信：client 与低层通过统一协议交换采样与控制指令
-4. 分析反馈：将低层观测结果回送到用户态用于策略决策
-
-### 防守研究建议
-
-- 把 boot 证据和 runtime 证据统一入库进行关联分析
-- 对关键路径建立基线（中断、页表、关键模块映射）
-- 将“是否异常”从单点判断升级为多信号评分模型
-
-### 研究目标
-
-- 研究 bootloader / hypervisor / client 的分层协作
-- 研究接口协议、内存管理与中断处理模块组织
-- 研究工程构建链与模块化调试方法
-
-### 合规与边界
-
-本项目仅用于安全研究与防御技术讨论，不用于任何未授权用途。
-
-由于部分密钥、证书、可执行链路、绕过/注入成品等属敏感信息不方便在 GitHub 上公开，需要或想交流的同伴可以联系我们官方 Discord 进行深入探讨。
-
----
+[English](#en) · [中文](#zh)
 
 <a id="en"></a>
 ## English
 
-`hyper` is a multi-component anti-cheat research project with layered architecture:
+### Project Overview
 
-- `src/bootloader/`: boot-stage component (UEFI related)
-- `src/hypervisor/`: core low-level logic
-- `src/client/`: user-mode control layer
-- `src/common/`: shared structures and protocol definitions
-- `docs/`: architecture and structure documentation
-- `tests/`: basic test samples
+`hyper` is a multi-project Windows / UEFI workspace organized around `hyper.sln`. The workspace is built from four central source areas:
 
-### Anti-Cheat Perspective
+- `src/bootloader/`
+- `src/hypervisor/`
+- `src/client/`
+- `src/common/`
 
-`hyper` is valuable because it exposes a full research surface from boot chain to low-level runtime to user-mode control:
+It also includes project-wide documentation, tests, a support source tree, and local build/output directories.
 
-- Boot-stage integrity: investigate replacement, path redirection, and early-stage tampering indicators
-- Runtime control plane: analyze observability of memory views, execution flow, and interrupt handling
-- User-mode orchestration: evaluate security of command, sampling, and feedback pipelines
+### What This Project Does
 
-### Potential Value and Use Cases (Defensive)
+At a high level, `hyper` brings together several stages of a native systems-oriented workspace in one repository:
 
-- Build layered defenses with earlier detection points (boot/early runtime)
-- Correlate boot events with runtime behavior
-- Evaluate robustness of single-point detection under cross-layer adversarial conditions
+- a boot-stage project under `src/bootloader`
+- a core low-level runtime project under `src/hypervisor`
+- a usermode-side client under `src/client`
+- a shared definition layer under `src/common`
 
-### Core Principles (High Level)
+This layout is useful for understanding how a multi-stage native workspace can keep:
 
-1. Boot-chain intervention to establish controlled load and validation paths
-2. Low-level monitoring through hypervisor-layer observability
-3. Unified protocol communication between client and low-level components
-4. Feedback analysis in user-mode for strategy decisions
+- early-stage/bootstrap code
+- core runtime logic
+- usermode-facing control or utility code
+- shared protocol and structure definitions
 
-### Defensive Research Recommendations
+inside one solution instead of scattering them across unrelated repositories.
 
-- Store and correlate boot evidence with runtime evidence
-- Baseline critical paths (interrupts, page tables, critical mappings)
-- Move from binary alerts to multi-signal scoring
+### High-Level Design
 
-### Research Focus
+The workspace is organized around component boundaries rather than one single binary:
 
-- Layered cooperation across bootloader, hypervisor, and client
-- Module organization for interface protocol, memory management, and interrupt handling
-- Build pipeline and modular debugging workflow
+1. `src/bootloader` contains the earliest-stage project material and its support trees
+2. `src/hypervisor` contains the central low-level runtime implementation
+3. `src/client` contains the usermode-side project tree
+4. `src/common` defines shared contracts used across the other components
+5. `docs/`, `tests/`, and `external/` provide documentation, auxiliary validation targets, and support code
 
-### Compliance & Boundaries
+In architectural terms, the repository is structured as:
 
-This project is for security research and defensive technical discussion only, and must not be used for unauthorized purposes.
+- stage-specific code in separate project roots
+- shared definitions in one common subtree
+- support material alongside the main source trees
 
-Some keys, certificates, executable chains, and bypass/injection deliverables are sensitive and are not suitable for public release on GitHub. For deeper discussion, please contact our official Discord.
+### Root Directory Layout
 
----
+The repository root contains:
 
-<a id="ja"></a>
-## 日本語
+- `hyper.sln`
+- `README.md`
+- `docs/`
+- `tests/`
+- `src/`
+- `external/`
+- `build/`
 
-`hyper` は複数コンポーネントで構成されたアンチチート研究プロジェクトです。主な構成は以下です。
+The entire project is centered on `src/` as the main source root.
 
-- `src/bootloader/`：起動段階コンポーネント（UEFI 関連）
-- `src/hypervisor/`：中核となる低レベルロジック
-- `src/client/`：ユーザーモード制御レイヤー
-- `src/common/`：共通構造体とプロトコル定義
-- `docs/`：アーキテクチャ文書
-- `tests/`：基本テスト
+### Workspace Structure
 
-### 研究目的
+The workspace is split into four main project areas:
 
-- bootloader / hypervisor / client のレイヤー連携の検証
-- インターフェース、メモリ管理、割り込み処理の設計研究
-- ビルドチェーンとモジュール化デバッグの検証
+1. boot-stage code in `src/bootloader`
+2. low-level runtime code in `src/hypervisor`
+3. usermode client code in `src/client`
+4. shared definitions in `src/common`
 
-### コンプライアンス
+`docs/structure-overview.md` documents the same split and serves as the top-level project map.
 
-本プロジェクトはセキュリティ研究および防御技術の議論のみを目的とします。
+### `src/bootloader`
 
-鍵・証明書・実行チェーン・バイパス/インジェクション成果物などの機微情報は GitHub で公開しません。詳細は公式 Discord へご連絡ください。
+`src/bootloader/` is a dedicated boot-stage project.
 
----
+#### Top-level files and directories
 
-<a id="ko"></a>
-## 한국어
+- `bootloader.vcxproj`
+- `bootloader.vcxproj.user`
+- `uefi.default.props`
+- `uefi.props`
+- `build/`
+- `ext/`
+- `src/`
 
-`hyper`는 다중 컴포넌트 구조의 안티치트 연구 프로젝트입니다. 주요 구성은 다음과 같습니다.
+#### `src/bootloader/ext/`
 
-- `src/bootloader/`: 부팅 단계 컴포넌트(UEFI 관련)
-- `src/hypervisor/`: 핵심 저수준 로직
-- `src/client/`: 사용자 모드 제어 계층
-- `src/common/`: 공용 구조체 및 프로토콜 정의
-- `docs/`: 아키텍처 문서
-- `tests/`: 기본 테스트
+This subtree includes:
 
-### 연구 목표
+- `edk2/`
+- `ia32-doc/`
+- `openssl/`
 
-- bootloader / hypervisor / client 계층 협업 구조 연구
-- 인터페이스, 메모리 관리, 인터럽트 처리 모듈 연구
-- 빌드 체인 및 모듈형 디버깅 워크플로우 연구
+#### `src/bootloader/src/`
 
-### 준수 및 범위
+This subtree includes:
 
-본 프로젝트는 보안 연구 및 방어 기술 논의 목적에만 사용됩니다.
+- `bootmgfw/`
+- `disk/`
+- `hooks/`
+- `hvloader/`
+- `hyperv_attachment/`
+- `image/`
+- `memory_manager/`
+- `structures/`
+- `winload/`
+- `main.c`
+- `PeHashCompute.c`
+- `PeHashCompute.h`
+- `TcgGuids.c`
+- `TpmLogSpoofer.c`
+- `TpmLogSpoofer.h`
+- `TpmMeasurementFilter.c`
+- `TpmMeasurementFilter.h`
 
-키, 인증서, 실행 체인, 바이패스/인젝션 산출물 등 민감 정보는 GitHub에 공개하지 않습니다. 자세한 논의는 공식 Discord로 문의해 주세요.
+`src/bootloader/` is organized as a full native project with:
 
----
+- its own project file
+- its own property sheets
+- its own external dependency subtree
+- its own internal source hierarchy
 
-<a id="ru"></a>
-## Русский
+### `src/hypervisor`
 
-`hyper` — много-компонентный исследовательский anti-cheat проект с послойной архитектурой:
+`src/hypervisor/` is the core low-level project in the workspace.
 
-- `src/bootloader/`: компонент стадии загрузки (UEFI)
-- `src/hypervisor/`: ядро низкоуровневой логики
-- `src/client/`: user-mode слой управления
-- `src/common/`: общие структуры и определения протоколов
-- `docs/`: архитектурная документация
-- `tests/`: базовые тесты
+#### Top-level files and directories
 
-### Цели исследования
+- `hypervisor.vcxproj`
+- `hypervisor.vcxproj.filters`
+- `hypervisor.vcxproj.user`
+- `ext/`
+- `src/`
 
-- Изучение взаимодействия слоев bootloader / hypervisor / client
-- Изучение структуры модулей интерфейса, памяти и прерываний
-- Изучение сборочной цепочки и модульной отладки
+#### `src/hypervisor/ext/`
 
-### Соответствие и ограничения
+This subtree includes:
 
-Проект предназначен только для исследований безопасности и обсуждения defensive-подходов.
+- `ia32-doc/`
 
-Ключи, сертификаты, исполняемые цепочки и готовые bypass/injection материалы не публикуются на GitHub. Для подробного обсуждения используйте наш официальный Discord.
+#### `src/hypervisor/src/`
 
----
+This subtree includes:
 
-<a id="uk"></a>
-## Українська
+- `apic/`
+- `arch/`
+- `core/`
+- `cr3_cache/`
+- `crt/`
+- `hypercall/`
+- `interrupts/`
+- `logs/`
+- `memory/`
+- `memory_manager/`
+- `slat/`
+- `structures/`
+- `arch_config.h`
+- `main.cpp`
 
-`hyper` — багатокомпонентний дослідницький anti-cheat проєкт із шаровою архітектурою:
+The hypervisor project separates:
 
-- `src/bootloader/`: компонент етапу завантаження (UEFI)
-- `src/hypervisor/`: ядро низькорівневої логіки
-- `src/client/`: user-mode шар керування
-- `src/common/`: спільні структури й протоколи
-- `docs/`: архітектурна документація
-- `tests/`: базові тести
+- APIC-related code
+- architecture code
+- core definitions
+- cache-related code
+- runtime support
+- wrapper/interface code
+- interrupt handling
+- logging
+- memory handling
+- SLAT-related code
+- shared low-level structures
 
-### Мета дослідження
+### `src/client`
 
-- Вивчення взаємодії шарів bootloader / hypervisor / client
-- Вивчення модулів інтерфейсу, керування пам’яттю та обробки переривань
-- Вивчення пайплайна збірки та модульного налагодження
+`src/client/` is the usermode client project in the workspace.
 
-### Відповідність і межі
+#### Top-level files and directories
 
-Проєкт призначено лише для безпекових досліджень і defensive-обговорень.
+- `client.vcxproj`
+- `client.vcxproj.filters`
+- `client.vcxproj.user`
+- `test_enum.cpp`
+- `vcpkg.json`
+- `ext/`
+- `src/`
+- `vcpkg_installed/`
 
-Ключі, сертифікати, виконувані ланцюги та готові bypass/injection матеріали не публікуються на GitHub. Для детального обговорення звертайтеся в наш офіційний Discord.
+#### `src/client/ext/`
 
----
+This subtree includes:
 
-<a id="vi"></a>
-## Tiếng Việt
+- `portable_executable/`
 
-`hyper` là dự án nghiên cứu anti-cheat đa thành phần với kiến trúc phân lớp:
+#### `src/client/src/`
 
-- `src/bootloader/`: thành phần giai đoạn khởi động (liên quan UEFI)
-- `src/hypervisor/`: logic mức thấp cốt lõi
-- `src/client/`: lớp điều khiển user-mode
-- `src/common/`: cấu trúc và định nghĩa giao thức dùng chung
-- `docs/`: tài liệu kiến trúc
-- `tests/`: bài kiểm thử cơ bản
+This subtree includes:
 
-### Mục tiêu nghiên cứu
+- `commands/`
+- `dll_loader/`
+- `hook/`
+- `hypercall/`
+- `system/`
+- `main.cpp`
+- `pfn_query_demo.cpp`
 
-- Nghiên cứu phối hợp giữa các lớp bootloader / hypervisor / client
-- Nghiên cứu tổ chức mô-đun giao diện, bộ nhớ và xử lý ngắt
-- Nghiên cứu chuỗi build và quy trình debug theo mô-đun
+`src/client/` is a complete client-side native project with:
 
-### Tuân thủ và phạm vi
+- its own project files
+- its own source entry point
+- its own command/loader/hook/system trees
+- its own dependency manifest
+- its own local dependency installation tree
 
-Dự án chỉ dùng cho nghiên cứu bảo mật và thảo luận kỹ thuật phòng thủ.
+### `src/common`
 
-Một số khóa, chứng chỉ, chuỗi thực thi và sản phẩm bypass/injection là thông tin nhạy cảm nên không công khai trên GitHub. Nếu cần trao đổi sâu hơn, vui lòng liên hệ Discord chính thức của chúng tôi.
+`src/common/` is the shared definition layer.
 
+#### `src/common/hypercall/`
+
+- `hypercall_def.h`
+
+#### `src/common/structures/`
+
+- `memory_operation.h`
+- `trap_frame.h`
+
+This area provides shared contracts used across the other project trees.
+
+### `docs/`
+
+`docs/` contains:
+
+- `structure-overview.md`
+
+This document is the most direct starting point for understanding:
+
+- component boundaries
+- directory roles
+- naming conventions
+- output layout
+
+### `tests/`
+
+`tests/` includes:
+
+- `basic-test/`
+
+The test project area contains its own Visual Studio project and sample source tree, which makes it a lightweight companion target inside the same workspace.
+
+### `external/`
+
+The root-level `external/` tree is a support source area that sits alongside the main `src/` workspace.
+
+This area contains files related to:
+
+- architecture helpers
+- APIC support
+- hypercall support
+- interrupt handling
+- memory management
+- runtime support
+- SLAT-related code
+- logging and parser helpers
+
+### Build and Output Footprint
+
+The workspace keeps local build/output structure in multiple places:
+
+- `build/`
+- `src/bootloader/build/`
+- `src/bootloader/build/x64/`
+- `src/client/vcpkg_installed/x64-windows-static/`
+
+This keeps the repository close to an actively used native development tree.
+
+### Project Relationships
+
+The workspace can be read as three executable/code-bearing tracks plus one shared layer:
+
+1. `src/bootloader`
+2. `src/hypervisor`
+3. `src/client`
+4. `src/common`
+
+The shared documentation and support trees are:
+
+- `docs/`
+- `tests/`
+- `external/`
+
+### Recommended Reading Order
+
+Recommended reading order:
+
+1. `hyper.sln`
+2. `docs/structure-overview.md`
+3. `src/bootloader/bootloader.vcxproj`
+4. `src/bootloader/src/`
+5. `src/hypervisor/hypervisor.vcxproj`
+6. `src/hypervisor/src/`
+7. `src/client/client.vcxproj`
+8. `src/client/src/`
+9. `src/common/`
+10. `tests/basic-test/`
+11. `external/`
+
+### Summary
+
+`hyper` is a multi-component native workspace built from:
+
+- a boot-stage project
+- a core low-level project
+- a usermode client project
+- a shared common definition layer
+- bundled support and documentation trees
+- local build/output directories
+
+<a id="zh"></a>
+## 中文
+
+### 项目概览
+
+`hyper` 是一个围绕 `hyper.sln` 组织的 Windows / UEFI 多工程工作区。整个工作区主要由四个核心源码区域构成：
+
+- `src/bootloader/`
+- `src/hypervisor/`
+- `src/client/`
+- `src/common/`
+
+同时还包含项目级文档、测试、支持源码树以及本地构建/输出目录。
+
+### 项目作用
+
+从工程层面看，`hyper` 把一套偏系统级的原生工作区不同阶段集中在同一个仓库里：
+
+- `src/bootloader` 对应引导阶段工程
+- `src/hypervisor` 对应核心低层运行时工程
+- `src/client` 对应用户态侧工程
+- `src/common` 对应跨组件共享定义层
+
+这种布局适合用来理解一套多阶段原生工作区如何把以下内容放在同一套解决方案中：
+
+- 早期阶段/引导阶段代码
+- 核心运行时代码
+- 用户态控制或工具代码
+- 共享协议和结构定义
+
+### 整体原理
+
+整个工作区围绕“按组件边界拆分”而不是“单一二进制”来组织：
+
+1. `src/bootloader` 放最早阶段项目及其支持树
+2. `src/hypervisor` 放核心低层运行时实现
+3. `src/client` 放用户态侧工程树
+4. `src/common` 定义跨组件共享契约
+5. `docs/`、`tests/`、`external/` 提供文档、辅助验证目标和支持代码
+
+从架构角度看，整个仓库等于把下面几类内容分层放好：
+
+- 按阶段拆分的工程根目录
+- 单独的共享定义层
+- 紧贴主源码树的支持材料
+
+### 根目录结构
+
+仓库根目录包含：
+
+- `hyper.sln`
+- `README.md`
+- `docs/`
+- `tests/`
+- `src/`
+- `external/`
+- `build/`
+
+整个项目以 `src/` 为主源码根目录。
+
+### 工作区结构
+
+工作区主要拆分为四个项目区域：
+
+1. `src/bootloader` 中的引导阶段代码
+2. `src/hypervisor` 中的低层运行时代码
+3. `src/client` 中的用户态客户端代码
+4. `src/common` 中的共享定义
+
+`docs/structure-overview.md` 使用同样的划分方式描述整个项目，是最直接的整体地图。
+
+### `src/bootloader`
+
+`src/bootloader/` 是独立的引导阶段工程。
+
+#### 顶层文件与目录
+
+- `bootloader.vcxproj`
+- `bootloader.vcxproj.user`
+- `uefi.default.props`
+- `uefi.props`
+- `build/`
+- `ext/`
+- `src/`
+
+#### `src/bootloader/ext/`
+
+这一子树包含：
+
+- `edk2/`
+- `ia32-doc/`
+- `openssl/`
+
+#### `src/bootloader/src/`
+
+这一子树包含：
+
+- `bootmgfw/`
+- `disk/`
+- `hooks/`
+- `hvloader/`
+- `hyperv_attachment/`
+- `image/`
+- `memory_manager/`
+- `structures/`
+- `winload/`
+- `main.c`
+- `PeHashCompute.c`
+- `PeHashCompute.h`
+- `TcgGuids.c`
+- `TpmLogSpoofer.c`
+- `TpmLogSpoofer.h`
+- `TpmMeasurementFilter.c`
+- `TpmMeasurementFilter.h`
+
+`src/bootloader/` 是一套完整的原生工程，包含：
+
+- 自己的工程文件
+- 自己的属性表
+- 自己的外部依赖子树
+- 自己的内部源码层级
+
+### `src/hypervisor`
+
+`src/hypervisor/` 是工作区中的核心低层工程。
+
+#### 顶层文件与目录
+
+- `hypervisor.vcxproj`
+- `hypervisor.vcxproj.filters`
+- `hypervisor.vcxproj.user`
+- `ext/`
+- `src/`
+
+#### `src/hypervisor/ext/`
+
+这一子树包含：
+
+- `ia32-doc/`
+
+#### `src/hypervisor/src/`
+
+这一子树包含：
+
+- `apic/`
+- `arch/`
+- `core/`
+- `cr3_cache/`
+- `crt/`
+- `hypercall/`
+- `interrupts/`
+- `logs/`
+- `memory/`
+- `memory_manager/`
+- `slat/`
+- `structures/`
+- `arch_config.h`
+- `main.cpp`
+
+该工程内部拆分为：
+
+- APIC 相关代码
+- 架构代码
+- 核心定义
+- 缓存相关代码
+- 运行时支持
+- 包装/接口代码
+- 中断处理
+- 日志
+- 内存处理
+- SLAT 相关代码
+- 共享低层结构
+
+### `src/client`
+
+`src/client/` 是工作区中的用户态客户端工程。
+
+#### 顶层文件与目录
+
+- `client.vcxproj`
+- `client.vcxproj.filters`
+- `client.vcxproj.user`
+- `test_enum.cpp`
+- `vcpkg.json`
+- `ext/`
+- `src/`
+- `vcpkg_installed/`
+
+#### `src/client/ext/`
+
+这一子树包含：
+
+- `portable_executable/`
+
+#### `src/client/src/`
+
+这一子树包含：
+
+- `commands/`
+- `dll_loader/`
+- `hook/`
+- `hypercall/`
+- `system/`
+- `main.cpp`
+- `pfn_query_demo.cpp`
+
+`src/client/` 是一套完整的客户端侧原生工程，具备：
+
+- 自己的工程文件
+- 自己的入口
+- 自己的 command / loader / hook / system 子树
+- 自己的依赖清单
+- 自己的本地依赖安装树
+
+### `src/common`
+
+`src/common/` 是共享定义层。
+
+#### `src/common/hypercall/`
+
+- `hypercall_def.h`
+
+#### `src/common/structures/`
+
+- `memory_operation.h`
+- `trap_frame.h`
+
+这一层为其他工程树提供共享契约。
+
+### `docs/`
+
+`docs/` 包含：
+
+- `structure-overview.md`
+
+这份文档是理解以下内容的最直接入口：
+
+- 组件边界
+- 目录职责
+- 命名规则
+- 输出布局
+
+### `tests/`
+
+`tests/` 包含：
+
+- `basic-test/`
+
+测试工程区域拥有自己的 Visual Studio 工程与样例源码树，是同一工作区中的轻量配套目标。
+
+### `external/`
+
+根目录的 `external/` 是与主 `src/` 工作区并行存在的支持源码区域。
+
+这一部分包含与以下内容相关的文件：
+
+- 架构辅助
+- APIC 支持
+- hypercall 支持
+- 中断处理
+- 内存管理
+- 运行时支持
+- SLAT 相关代码
+- 日志与解析辅助
+
+### 构建与输出痕迹
+
+工作区在多个位置保留了本地构建/输出结构：
+
+- `build/`
+- `src/bootloader/build/`
+- `src/bootloader/build/x64/`
+- `src/client/vcpkg_installed/x64-windows-static/`
+
+这些目录让整个仓库保持了真实原生开发工作树的形态。
+
+### 工程关系
+
+整个工作区可以理解为“三条主要工程线 + 一层共享定义”：
+
+1. `src/bootloader`
+2. `src/hypervisor`
+3. `src/client`
+4. `src/common`
+
+配套的文档与支持树包括：
+
+- `docs/`
+- `tests/`
+- `external/`
+
+### 阅读建议
+
+推荐顺序如下：
+
+1. `hyper.sln`
+2. `docs/structure-overview.md`
+3. `src/bootloader/bootloader.vcxproj`
+4. `src/bootloader/src/`
+5. `src/hypervisor/hypervisor.vcxproj`
+6. `src/hypervisor/src/`
+7. `src/client/client.vcxproj`
+8. `src/client/src/`
+9. `src/common/`
+10. `tests/basic-test/`
+11. `external/`
+
+### 总结
+
+`hyper` 是一个多组件原生工作区，核心由以下部分构成：
+
+- 引导阶段工程
+- 核心低层工程
+- 用户态客户端工程
+- 共享公共定义层
+- 内置文档与支持树
+- 本地构建/输出目录
