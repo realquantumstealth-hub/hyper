@@ -1,12 +1,16 @@
-# hyper 项目分析说明
+# hyper Project Analysis / hyper 项目分析说明
 
 > Official Forum / 官方论坛: https://discord.gg/qslab
+
+Languages: [中文](#说明) | [English](#english-version)
 
 ## 说明
 
 本文档面向受控实验环境中的反作弊、内核安全、启动链安全分析人员。内容目标是把这个仓库的工程结构、启动链行为、Hyper-V 附着方式、hypercall 协议、用户态控制端能力、隐匿/规避相关实现和可观测检测面说明白。
 
 `hyper` 不是普通应用，也不是常规 Windows 驱动。它是一套围绕 Windows UEFI 启动链和 Hyper-V VM-exit 路径构建的多阶段研究项目。它试图在 Windows 启动过程中把一个自定义运行时接入 Hyper-V 的 VM-exit handler，然后让用户态 `client.exe` 通过 `CPUID` 指令触发自定义 hypercall，从而获得跨地址空间读写、SLAT/EPT/NPT hook、隐藏页、CR3 缓存、PFN 查询等能力。
+
+当前仓库明显继承了公开项目 `noahware/hyper-reV` 的核心思路：替换/链式启动 `bootmgfw.efi`，在 `bootmgfw`、`winload`、`hvloader` 阶段逐级 hook，最终把自定义代码接到 Hyper-V VM-exit handler。`hyper-reV` 原始说明中把 TPM/Measured Boot 视为会暴露 `uefi-boot` 的短板；本仓库额外加入了 `TpmMeasurementFilter.c`、`TpmLogSpoofer.c`、`PeHashCompute.c`，试图处理 TPM/TCG event log 中的 `bootmgfw.efi` 测量痕迹。
 
 请只在授权、隔离、可恢复的测试环境中分析。本文档不把它当作可部署工具来写，而是把它当作反作弊对抗样本和内核安全研究样本来拆解。
 
@@ -28,6 +32,8 @@ UEFI bootloader
 ```
 
 从反作弊视角看，它属于“启动前注入 + Hyper-V VM-exit 劫持 + 二级页表视图切换 + 用户态控制器”的组合。
+
+另一个重要特征是“Measured Boot 痕迹处理”。项目不是只做 Hyper-V 附着，还尝试在链式启动原始 `bootmgfw.efi` 前修改 UEFI 暴露的 TCG event log，让后续 Windows/远程证明看到的启动测量更接近合法链路。注意：这不是可靠意义上的“清空 TPM”。TPM PCR 是 extend-only 语义，正常情况下不能随意回滚；代码更准确的目标是修改内存中的 event log、删除或伪装异常 `bootmgfw.efi` 事件，并尝试用 TPM2 命令或 `HashLogExtendEvent` 做有限同步。
 
 ## 解决方案组成
 
@@ -86,6 +92,26 @@ UEFI bootloader
 - `client`: 负责“Windows 已启动后如何发命令”。
 - `common`: 负责“client 和 hypervisor 之间如何约定协议”。
 
+## 与公开雏形 hyper-reV 的关系
+
+从结构和行为看，本仓库与 `noahware/hyper-reV` 的公开思路高度一致：
+
+- 都以 UEFI bootloader 作为最早落点。
+- 都围绕 `bootmgfw.efi`、`winload.efi`、`hvloader` 的加载过程放置 hook。
+- 都把 payload 以 `hyperv-attachment.dll` 形式带入启动链。
+- 都扫描 Hyper-V text 区，定位 VM-exit handler 相关调用点。
+- 都通过改写 Hyper-V VM-exit 路径，让自定义 hypervisor runtime 先于原始 handler 执行。
+- 都在 Windows 启动后由用户态控制端触发 VM-exit/hypercall。
+
+关键差异在 TPM/Measured Boot：
+
+- 原型说明中把 TPM 使用场景标成会暴露 `uefi-boot` 的问题点，也就是只要有 measured boot/attestation，替换过的启动组件会留下可信启动链证据。
+- 当前仓库加入了 event log 删除、digest 伪装、PCR extend/Reset 尝试和原始 `bootmgfw.efi` hash 计算代码。
+- 当前仓库的 `main.c` 里 TPM filter 初始化被注释，但 `bootmgfw_run_original_image` 在链式启动前仍调用 `CleanTpmBeforeChaining`。
+- 因此它的 TPM 部分更像“在原型上补的对抗实验层”，还不能等价理解为完整绕过 measured boot。
+
+反作弊分析时可以把 `hyper-reV` 当作主干模型，把当前仓库当作加入 TPM event log 对抗、CR3 cache、hidden memory、PFN DB 操作、目标游戏实验命令后的扩展版。
+
 ## 启动链细节
 
 ### 1. UEFI 入口
@@ -126,6 +152,8 @@ UEFI bootloader
 - 它不是永久替换 bootmgfw 的完整实现，而是在执行前把原始 bootmgfw 恢复回来并链式启动。
 - hook 目标通过模式扫描定位 `ImgpLoadPEImage` 相关调用点。
 - `bootmgfw_run_original_image` 中调用了 `SetLegitimateBootmgfwInfo` 和 `CleanTpmBeforeChaining`，说明作者关注 TPM/TCG event log 中 bootmgfw 测量痕迹。
+- `SetLegitimateBootmgfwInfo` 记录被链式加载的原始 `bootmgfw.efi` 内存基址和大小，后续 `TpmMeasurementFilter.c` 会用它区分“合法 bootmgfw 测量”和“替换阶段 bootloader/异常 bootmgfw 测量”。
+- `CleanTpmBeforeChaining` 的调用时机很关键：它发生在原始 `bootmgfw.efi` 即将 `StartImage` 之前，目标是先修改当前 UEFI TCG event log，再把控制权交给真正的 Windows Boot Manager。
 
 ### 3. winload 阶段
 
@@ -220,6 +248,115 @@ UEFI bootloader
 - EFI 分区曾经存在 `\efi\microsoft\boot\hyperv-attachment.dll`，读取后删除。
 - UEFI runtime services data 中出现一段连续页，包含 PE header/section 复制痕迹。
 - 后续 hypervisor 会尝试隐藏这段 heap。
+
+## TPM/TCG 与 Measured Boot
+
+这一部分是当前仓库相对公开雏形 `hyper-reV` 最值得注意的增量。`hyper-reV` 的核心链路已经能完成 UEFI 阶段到 Hyper-V VM-exit 的接管，但它的原始说明里明确提到：在启用 TPM/Measured Boot/attestation 的机器上，启动测量会记录异常的 `uefi-boot` 或替换过的启动组件，远程证明/反作弊可以据此发现问题。
+
+当前仓库加入了三类 TPM 相关代码：
+
+| 文件 | 作用 | 状态判断 |
+|---|---|---|
+| `src/bootloader/src/TpmMeasurementFilter.c` | 获取 TCG/TCG2 protocol，读取 event log，删除或过滤异常 `bootmgfw.efi` 事件，保留被链式加载的原始 `bootmgfw.efi` 事件 | 主路径里部分接入，`CleanTpmBeforeChaining` 会被调用 |
+| `src/bootloader/src/TpmLogSpoofer.c` | 直接扫描 TCG2 event log，尝试替换 `bootmgfw.efi` digest，并尝试 PCR extend/同步 | 更像实验性备用实现，当前主流程没有直接调用 `SpoofTpmEventLog` |
+| `src/bootloader/src/PeHashCompute.c` | 计算原始 `bootmgfw.efi` 的 Authenticode 风格 SHA-256 hash，供 event log 伪装使用 | 代码存在，但主路径没有完整串起来 |
+| `src/bootloader/src/TcgGuids.c` | 定义 TCG/TCG2 protocol GUID | 支撑 TPM 模块编译/定位协议 |
+
+### 真实执行路径
+
+`src/bootloader/src/main.c` 中原本有一段 TPM filter 初始化逻辑：
+
+```c
+//status = TpmMeasurementFilterEntry(image_handle, system_table);
+```
+
+这段目前被注释掉了，所以 `TpmMeasurementFilterEntry` / `InitializeTpmResetReplay` 不会在 UEFI 入口阶段主动执行。也就是说，`mOriginalTcg2Protocol`、`mOriginalTcgProtocol`、`mOriginalTcg2HashLogExtendEvent` 这些静态全局指针只有在别的路径初始化过时才可靠。
+
+但 `src/bootloader/src/bootmgfw/bootmgfw.c` 的 `bootmgfw_run_original_image` 里确实会：
+
+1. `LoadImage` 加载原始 `bootmgfw.efi`。
+2. 通过 `get_image_info` 读取原始 `bootmgfw.efi` 的 `ImageBase` / `ImageSize`。
+3. 调用 `SetLegitimateBootmgfwInfo` 记录合法 boot manager 的内存范围。
+4. 放置 bootmgfw hook。
+5. 在 `StartImage` 前调用 `CleanTpmBeforeChaining`。
+
+所以当前仓库的意图很清楚：先让替换过的 UEFI bootloader 完成 Hyper-V attachment 准备，然后恢复并加载原始 `bootmgfw.efi`，最后在交给原始 boot manager 之前清理 event log 中能指向替换阶段的 `bootmgfw.efi` 测量。
+
+### `TpmMeasurementFilter.c` 的逻辑
+
+核心函数是 `CleanTpmBeforeChaining`：
+
+```text
+CleanTpmBeforeChaining
+  -> RemoveBootmgfwFromEventLog
+    -> GetCurrentEventLog
+      -> TCG2 GetEventLog 或 TCG 1.2 StatusCheck
+    -> 遍历 TCG 2.0 / TCG 1.2 event log
+    -> IsBootmgfwMeasurementEvent
+    -> 对命中的异常 bootmgfw event 做内存内压缩删除
+    -> ZeroMem 清空尾部
+```
+
+`IsBootmgfwMeasurementEvent` 的判断方式：
+
+- 只关注 `EV_EFI_BOOT_SERVICES_APPLICATION` 和 `EV_EFI_RUNTIME_SERVICES_DRIVER`。
+- 事件数据至少要能解释为 `EFI_IMAGE_LOAD_EVENT`。
+- 从 event data 里尝试解析路径，寻找 `bootmgfw.efi` 字符串。
+- 如果事件的 `ImageLocationInMemory` / `ImageLengthInMemory` 等于 `SetLegitimateBootmgfwInfo` 记录的原始 `bootmgfw.efi`，就认为这是合法测量并保留。
+- 其他包含 `bootmgfw.efi` 但内存范围不匹配的事件，被认为是替换阶段/异常 bootmgfw 测量并删除。
+
+这不是清除 TPM 芯片里的 PCR。它是改 UEFI 暴露的 event log 内存区域。对反作弊来说，重要区别是：
+
+- PCR 值仍然是硬件 TPM 内 extend 结果，正常情况下不能被任意回滚。
+- event log 是用于解释 PCR 链的日志；如果日志被改而 PCR 没同步，就可能出现“event log replay 后的 PCR 和硬件 PCR 不一致”。
+- 远程证明如果同时校验 PCR quote 和 event log replay，一致性可能失败。
+- 如果某些本地/早期组件只读取 event log，不做强 quote 校验，内存中的 event log 篡改可能影响它们的观察结果。
+
+### `TpmLogSpoofer.c` 的逻辑
+
+`TpmLogSpoofer.c` 更像另一条实验路线，名字比实际更激进。它做了这些尝试：
+
+- `LocateAndSpoofTpmEventLog`：通过 `EFI_TCG2_PROTOCOL->GetEventLog` 找 TCG2 event log，扫描事件，发现包含 `bootmgfw.efi` 的事件后替换 digest。
+- `UpdatePCRDirectly`：调用 `HashLogExtendEvent` 并使用 `EFI_TCG2_EXTEND_ONLY`，意图只 extend PCR 不写 event log。
+- `ExtendHashToTPM`：构造 `TPM2_PCR_Extend` 原始命令，通过 `SubmitCommand` 发送给 TPM。
+- `ResetPCRToZero` / `ClearPCRValue`：尝试用零 hash extend 或 PCR_Reset 思路影响 PCR。
+- `SynchronizeTPMWithEventLog`：注释承认 PCR extend 可能失败，也承认很多场景可能主要看 event log。
+
+这些代码要作为“意图和实验痕迹”看，而不是作为稳定能力看。尤其是 `ClearPCRValue` 并不会真正把 boot PCR 清零，extend 零值只是继续改变 PCR；`TPM2_PCR_Reset` 对常见 boot PCR 也不会在正常启动上下文里随意成功。
+
+### `PeHashCompute.c` 的逻辑
+
+`PeHashCompute.c` 计算的是原始 `bootmgfw.efi` 的 Authenticode 风格 SHA-256 hash：
+
+- 跳过 PE checksum。
+- 跳过 security directory。
+- 按 raw data 顺序 hash section。
+- 排除签名区域。
+- 将结果存入 `LegitimateBootmgfwHash[32]`。
+
+这和 `TpmLogSpoofer.c` 的 digest 替换思路配套：先算出合法 bootmgfw 的 hash，再把 event log 里异常 bootmgfw 的 digest 改成合法 hash。不过当前主流程没有看到完整调用 `ComputeAndStoreLegitimateBootmgfwHash` -> `SpoofTpmEventLog` 的闭环。
+
+### 反作弊检测重点
+
+TPM/TCG 相关检测不要只问“TPM 有没有被清空”，更应该做一致性检查：
+
+- 检查 TCG event log replay 得到的 PCR 是否等于 TPM quote 返回的 PCR。
+- 检查 event log 中 `EV_EFI_BOOT_SERVICES_APPLICATION` 的 `bootmgfw.efi` 事件数量、顺序、路径、device path、image base/size 是否符合正常 Windows 启动。
+- 检查 event log 尾部是否出现被压缩删除后的零填充、异常截断或 `LastEntry` 与实际事件边界不一致。
+- 检查 `bootmgfw.efi` 文件时间戳/内容变化是否和 event log 中的测量摘要匹配。
+- 检查是否存在先被测量的替换 bootloader 后又被恢复原始 `bootmgfw.efi` 的时间线矛盾。
+- 检查 UEFI 内存中 TCG/TCG2 protocol 函数指针、event log buffer 所在内存类型、event log 区域是否在 `ExitBootServices` 前发生非固件路径写入。
+- 对比 Windows 侧 `Get-TpmEndorsementKeyInfo`、系统 measured boot 日志、远程 attestation 服务记录和本地 EFI 分区文件状态。
+
+从项目代码本身看，最直接的检测语义是：
+
+```text
+替换 bootmgfw/UEFI bootloader 已经被 TPM 测量
+  -> 项目恢复原始 bootmgfw
+  -> 项目在 StartImage 前修改 event log
+  -> Windows 之后看到的日志可能缺失第一次异常测量
+  -> 硬件 PCR 和篡改后日志 replay 可能不一致
+```
 
 ## UEFI hook 模板
 
@@ -829,6 +966,15 @@ RAX = 返回值
 - UEFI bootloader image 后续被 hypervisor 清零。
 - attachment heap 位于 runtime services data 类型页。
 
+### TPM/Measured Boot
+
+- TCG/TCG2 event log 中 `bootmgfw.efi` 相关事件数量、顺序、digest 和 device path 异常。
+- event log replay 得到的 PCR 与 TPM quote 的 PCR 不一致。
+- event log buffer 尾部出现压缩删除后的零填充，或 `LastEntry` 与实际事件边界不一致。
+- `EV_EFI_BOOT_SERVICES_APPLICATION` / `EV_EFI_RUNTIME_SERVICES_DRIVER` 中的 image base 和 image size 与正常 boot manager 加载行为不一致。
+- EFI 分区中文件时间线显示替换、恢复、删除，但 measured boot 日志缺失对应事件。
+- 启动早期存在对 TCG/TCG2 protocol、event log buffer 或 `HashLogExtendEvent`/`SubmitCommand` 的异常访问。
+
 ### Hyper-V/VM-exit
 
 - 原始 VM-exit handler call 被改到 code cave。
@@ -877,26 +1023,30 @@ RAX = 返回值
 1. `src/common/hypercall/hypercall_def.h`
 2. `src/bootloader/src/main.c`
 3. `src/bootloader/src/bootmgfw/bootmgfw.c`
-4. `src/bootloader/src/winload/winload.c`
-5. `src/bootloader/src/hvloader/hvloader.c`
-6. `src/bootloader/src/hyperv_attachment/hyperv_attachment.c`
-7. `src/hypervisor/src/main.cpp`
-8. `src/hypervisor/src/arch/arch.cpp`
-9. `src/hypervisor/src/slat/slat.cpp`
-10. `src/hypervisor/src/hypercall/hypercall.cpp`
-11. `src/hypervisor/src/memory_manager/memory_manager.cpp`
-12. `src/hypervisor/src/memory_manager/memory_management.cpp`
-13. `src/hypervisor/src/cr3_cache/cr3_cache.cpp`
-14. `src/client/src/hypercall/hypercall.cpp`
-15. `src/client/src/system/system.cpp`
-16. `src/client/src/hook/hook.cpp`
-17. `src/client/src/dll_loader/dll_loader.cpp`
-18. `src/client/src/commands/commands.cpp`
+4. `src/bootloader/src/TpmMeasurementFilter.c`
+5. `src/bootloader/src/TpmLogSpoofer.c`
+6. `src/bootloader/src/PeHashCompute.c`
+7. `src/bootloader/src/winload/winload.c`
+8. `src/bootloader/src/hvloader/hvloader.c`
+9. `src/bootloader/src/hyperv_attachment/hyperv_attachment.c`
+10. `src/hypervisor/src/main.cpp`
+11. `src/hypervisor/src/arch/arch.cpp`
+12. `src/hypervisor/src/slat/slat.cpp`
+13. `src/hypervisor/src/hypercall/hypercall.cpp`
+14. `src/hypervisor/src/memory_manager/memory_manager.cpp`
+15. `src/hypervisor/src/memory_manager/memory_management.cpp`
+16. `src/hypervisor/src/cr3_cache/cr3_cache.cpp`
+17. `src/client/src/hypercall/hypercall.cpp`
+18. `src/client/src/system/system.cpp`
+19. `src/client/src/hook/hook.cpp`
+20. `src/client/src/dll_loader/dll_loader.cpp`
+21. `src/client/src/commands/commands.cpp`
 
 读完这条线，就能完整串起：
 
 ```text
 启动链进入点
+  -> TPM/TCG event log 处理
   -> PE 加载 hook
   -> Hyper-V VM-exit 接管
   -> CPUID hypercall
@@ -918,3 +1068,915 @@ RAX = 返回值
 2. 它通过 SLAT/EPT/NPT 制造读写视图与执行视图差异。
 3. 它把用户态控制命令伪装成 CPUID 触发的 hypercall。
 
+## English Version
+
+This section is the English version of the analysis above. It is written for anti-cheat engineers, kernel security researchers, boot-chain analysts, and incident responders working in an authorized and controlled lab. It is not a deployment guide.
+
+`hyper` is not a normal application and it is not a conventional Windows driver. It is a multi-stage Windows UEFI and Hyper-V research project. Its core idea is to enter the Windows boot chain early, attach a custom runtime to the Hyper-V VM-exit path, and let a user-mode `client.exe` trigger custom hypercalls through the `CPUID` instruction after Windows has booted.
+
+At a high level, the project combines:
+
+- pre-OS UEFI boot-chain attachment
+- `bootmgfw.efi`, `winload.efi`, and `hvloader` hooks
+- Hyper-V VM-exit handler detouring
+- SLAT/EPT/NPT view switching
+- CPUID-based hypercalls
+- hidden memory experiments
+- CR3 caching
+- PFN database inspection and tampering experiments
+- TPM/TCG measured boot event log manipulation attempts
+
+The repository appears to inherit the main design from the public `noahware/hyper-reV` project. That original design already describes the UEFI boot module, restoration of `bootmgfw.efi`, `hyperv-attachment.dll`, Hyper-V VM-exit detouring, and the fact that TPM/measured boot/attestation can expose the earlier `uefi-boot` load. This repository adds TPM event log filtering/spoofing code, CR3 cache logic, hidden-memory functionality, PFN database logic, and target-specific experimental commands.
+
+### Summary
+
+The main execution chain is:
+
+```text
+UEFI bootloader
+  -> restore and chain-load the original bootmgfw.efi
+  -> hook bootmgfw PE loading
+  -> observe winload.efi
+  -> hook winload PE loading and memory map construction
+  -> capture ntoskrnl.exe base and hvloader
+  -> hook the Hyper-V launch path inside hvloader
+  -> scan the Hyper-V text section for the VM-exit handler and a code cave
+  -> attach the hyperv-attachment.dll VM-exit detour
+  -> after Windows boots, client.exe enters the custom hypercall path through CPUID
+```
+
+From an anti-cheat perspective, the project is best understood as:
+
+```text
+pre-OS boot-chain attachment
+  + Hyper-V VM-exit detour
+  + second-level address translation view switching
+  + user-mode command client
+```
+
+The TPM-related code should not be described as "clearing TPM" in a strict sense. TPM PCRs are extend-only in normal operation and cannot simply be rolled back. The more accurate description is that the project tries to modify the UEFI-exposed TCG event log in memory, remove or spoof suspicious `bootmgfw.efi` measurement events, and optionally attempt limited PCR synchronization through TPM2 commands or `HashLogExtendEvent`.
+
+### Solution Layout
+
+`hyper.sln` contains four Visual Studio projects:
+
+| Project | Path | Main output | Language | Purpose |
+|---|---|---|---|---|
+| `bootloader` | `src/bootloader` | `.efi` | C | UEFI-stage boot-chain attachment component |
+| `hypervisor` | `src/hypervisor` | `.dll` | C++20 / MASM | Runtime loaded into the Hyper-V context as a VM-exit detour |
+| `client` | `src/client` | `.exe` | C++ / MASM | User-mode interactive controller |
+| `basic-test` | `tests/basic-test` | `.dll` | C++ | Test DLL used by the manual/stealth loader experiments |
+
+Repository layout:
+
+```text
+.
+|-- hyper.sln
+|-- README.md
+|-- docs/
+|-- src/
+|   |-- bootloader/
+|   |-- hypervisor/
+|   |-- client/
+|   `-- common/
+|-- tests/
+`-- external/
+```
+
+Responsibilities:
+
+- `bootloader`: decides when and how the attachment enters the boot chain.
+- `hypervisor`: handles VM-exits, hypercalls, SLAT hooks, hidden memory, and memory-management operations.
+- `client`: sends commands after Windows has booted.
+- `common`: defines shared hypercall keys, structures, bitfields, and enums.
+
+### Relationship To hyper-reV
+
+The public `noahware/hyper-reV` project is the closest visible baseline. The shared design points are:
+
+- a UEFI bootloader is used as the earliest execution point
+- the original `bootmgfw.efi` is restored and chain-loaded
+- `bootmgfw.efi`, `winload.efi`, and `hvloader` are observed or hooked in sequence
+- `hyperv-attachment.dll` is loaded during the boot flow
+- Hyper-V memory is scanned to find a VM-exit handler call site and a code cave
+- a custom attachment runtime is inserted before the original Hyper-V VM-exit handler
+- a user-mode client later communicates with the attachment through CPUID-triggered VM-exits
+
+The important difference is TPM/measured boot handling:
+
+- the original design warns that TPM and boot attestation can reveal the `uefi-boot` component through PCRs or measured boot logs
+- this repository adds TCG event log deletion/spoofing attempts, PCR extend/reset experiments, and legitimate `bootmgfw.efi` hash calculation
+- the TPM initialization call in `main.c` is currently commented out, but `bootmgfw_run_original_image` still calls `CleanTpmBeforeChaining`
+- the TPM code should be treated as an experimental anti-analysis layer, not as a complete measured boot bypass
+
+### Boot Chain Details
+
+#### UEFI Entry
+
+The UEFI entry point is `UefiMain` in `src/bootloader/src/main.c`.
+
+Current high-level flow:
+
+1. Print `=== Hyper UEFI Boot Manager ===`.
+2. Restore the original `bootmgfw.efi`.
+3. Set up the Hyper-V attachment.
+4. Load and start the original `bootmgfw.efi` with hooks installed.
+
+Important paths:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `d_bootmgfw_path` | `\efi\microsoft\boot\bootmgfw.efi` | Windows Boot Manager path |
+| `d_path_original_bootmgfw` | `\efi\microsoft\boot\bootmgfw.original.efi` | Backup path for the original boot manager |
+| `d_hyperv_attachment_path` | `\efi\microsoft\boot\hyperv-attachment.dll` | Attachment payload loaded by the bootloader |
+
+The TPM filter initialization in `main.c` is present but commented:
+
+```c
+//status = TpmMeasurementFilterEntry(image_handle, system_table);
+```
+
+That matters because some TPM module globals are only initialized if this entry point is called.
+
+#### bootmgfw Stage
+
+Code: `src/bootloader/src/bootmgfw/bootmgfw.c`
+
+Important functions:
+
+| Function | Purpose |
+|---|---|
+| `bootmgfw_restore_original_file` | Reads `bootmgfw.original.efi`, writes it back to `bootmgfw.efi`, restores metadata, and deletes the backup file |
+| `bootmgfw_run_original_image` | Loads and starts the original boot manager through UEFI `LoadImage` / `StartImage` |
+| `bootmgfw_place_hooks` | Installs a hook in the boot manager after retrieving its loaded image information |
+| `bootmgfw_load_pe_image_detour` | Intercepts PE image loading and calls `winload_place_hooks` when `winload.efi` is observed |
+| `parse_uefi_boot_image_info` | Records the physical base and size of the UEFI boot image for later cleanup |
+
+Key observations:
+
+- The project does not simply keep a malicious `bootmgfw.efi` in place. It restores the original boot manager before chain-loading it.
+- The hook target is located through pattern scanning around the boot manager's PE loading path.
+- `SetLegitimateBootmgfwInfo` records the original boot manager image base and size.
+- `CleanTpmBeforeChaining` runs just before `StartImage`, attempting to clean the current TCG event log before execution is handed to the legitimate boot manager.
+
+#### winload Stage
+
+Code: `src/bootloader/src/winload/winload.c`
+
+Important functions:
+
+| Function | Purpose |
+|---|---|
+| `winload_place_hooks` | Installs the main winload hooks |
+| `winload_place_load_pe_image_hook` | Hooks winload PE loading |
+| `winload_load_pe_image_detour` | Observes images loaded by winload, especially `ntoskrnl.exe` and `hvloader` |
+| `winload_place_oslp_build_kernel_memory_map_hook` | Hooks `OslpBuildKernelMemoryMap` |
+| `winload_oslp_build_kernel_memory_map_detour` | Rewrites the loader memory map entry for the attachment heap |
+| `WriteDebugFile` | Writes debug output to `\debug.txt` on the EFI partition |
+
+Behavior:
+
+- When `ntoskrnl.exe` is loaded, the project records `g_ntoskrnl_base_address`.
+- When `hvloader` is loaded, the project calls `hvloader_place_hooks`.
+- The memory map detour walks loader descriptors and changes the descriptor that matches `hyperv_attachment_heap_allocation_base` to memory type `24`, which is treated as reserved loader memory.
+- `\debug.txt` on the EFI partition is a direct forensic artifact.
+
+#### hvloader Stage
+
+Code: `src/bootloader/src/hvloader/hvloader.c`
+
+Important functions:
+
+| Function | Purpose |
+|---|---|
+| `hvloader_place_hooks` | Finds and hooks the function that launches Hyper-V |
+| `hvloader_launch_hv_detour` | Temporarily installs an identity map, switches into the Hyper-V CR3 context, and sets up Hyper-V hooks |
+| `load_identity_map_into_hyperv_cr3` | Writes the temporary identity map into the Hyper-V PML4 |
+| `set_up_hyperv_hooks` | Finds the Hyper-V text range, VM-exit handler call site, code cave, and installs the attachment detour |
+
+The main hook operation is:
+
+1. Switch into the Hyper-V CR3 context.
+2. Locate the Hyper-V text range.
+3. Find the VM-exit handler call site.
+4. Invoke the attachment entry point.
+5. Find a `0xCC` code cave.
+6. Write a detour in the code cave.
+7. Patch the original VM-exit handler call to reach the new detour.
+8. Restore the temporary CR3 mapping state.
+
+Detection points:
+
+- modified call target inside the Hyper-V text section
+- trampoline bytes written into a `0xCC` code cave
+- temporary identity mapping inserted during Hyper-V launch
+- architecture-specific Intel/AMD VM-exit signature scanning
+
+#### hyperv_attachment Loading
+
+Code: `src/bootloader/src/hyperv_attachment/hyperv_attachment.c`
+
+Behavior:
+
+- opens `\efi\microsoft\boot\hyperv-attachment.dll`
+- validates the PE image
+- deletes the file after loading it into memory
+- allocates `EfiRuntimeServicesData` pages
+- copies PE headers and sections
+- applies relocations
+- gets the relocated entry point
+- calls the attachment entry point
+
+Important globals:
+
+| Global | Meaning |
+|---|---|
+| `hyperv_attachment_physical_base` | Physical base of the copied attachment image |
+| `hyperv_attachment_heap_allocation_base` | Base of the full attachment heap allocation |
+| `hyperv_attachment_heap_allocation_usable_base` | Current allocation cursor |
+| `hyperv_attachment_heap_allocation_size` | Total heap size |
+| `hyperv_attachment_heap_4kb_pages_reserved` | Reserved page count, default 2048 |
+| `pml4_physical_allocation` / `pdpt_physical_allocation` | Page-table pages used for the temporary identity map |
+
+Observable artifacts:
+
+- the attachment file may exist briefly on the EFI partition
+- runtime services memory contains copied PE headers and sections
+- the heap is later hidden by the hypervisor side
+
+### TPM/TCG And Measured Boot
+
+This is the main addition over the public baseline design. The original `hyper-reV` documentation states that TPM and boot attestation can see the `uefi-boot` image through PCRs or measured boot logs. This repository tries to reduce that exposure by editing or spoofing the TCG event log.
+
+TPM-related files:
+
+| File | Purpose | Status |
+|---|---|---|
+| `src/bootloader/src/TpmMeasurementFilter.c` | Finds TCG/TCG2 protocols, reads the event log, removes suspicious `bootmgfw.efi` events, and preserves the legitimate boot manager event | Partially integrated, `CleanTpmBeforeChaining` is called |
+| `src/bootloader/src/TpmLogSpoofer.c` | Scans TCG2 event logs, replaces `bootmgfw.efi` digests, and attempts PCR synchronization | Experimental fallback path, not called by the current main flow |
+| `src/bootloader/src/PeHashCompute.c` | Computes an Authenticode-style SHA-256 hash for the legitimate `bootmgfw.efi` | Present but not fully wired into the main path |
+| `src/bootloader/src/TcgGuids.c` | Defines TCG/TCG2 protocol GUIDs | Support code |
+
+#### Actual Execution Path
+
+The intended TPM flow is:
+
+```text
+bootmgfw_run_original_image
+  -> LoadImage(original bootmgfw.efi)
+  -> get_image_info
+  -> SetLegitimateBootmgfwInfo
+  -> bootmgfw_place_hooks
+  -> CleanTpmBeforeChaining
+  -> StartImage(original bootmgfw.efi)
+```
+
+`SetLegitimateBootmgfwInfo` records the memory base and size of the original boot manager. `CleanTpmBeforeChaining` then tries to remove `bootmgfw.efi` measurement events that do not match that legitimate image.
+
+#### TpmMeasurementFilter.c
+
+Core flow:
+
+```text
+CleanTpmBeforeChaining
+  -> RemoveBootmgfwFromEventLog
+    -> GetCurrentEventLog
+      -> TCG2 GetEventLog or TCG 1.2 StatusCheck
+    -> walk TCG 2.0 or TCG 1.2 events
+    -> IsBootmgfwMeasurementEvent
+    -> compact the log in memory by skipping suspicious events
+    -> zero the remaining tail
+```
+
+`IsBootmgfwMeasurementEvent` checks:
+
+- event type is `EV_EFI_BOOT_SERVICES_APPLICATION` or `EV_EFI_RUNTIME_SERVICES_DRIVER`
+- event data looks like an `EFI_IMAGE_LOAD_EVENT`
+- the event contains a `bootmgfw.efi` path
+- the image base and size either match or do not match the legitimate boot manager recorded earlier
+
+If the event matches the legitimate boot manager, it is preserved. If it references `bootmgfw.efi` but does not match the legitimate image, the code treats it as a suspicious earlier measurement and removes it from the in-memory event log.
+
+Important distinction:
+
+- this does not reset hardware PCRs
+- it modifies the event log buffer exposed by firmware
+- a strong attestation flow can replay the modified event log and compare it with a TPM quote
+- if the replayed PCR does not match the hardware PCR, the event log manipulation becomes detectable
+
+#### TpmLogSpoofer.c
+
+This file implements a more experimental path:
+
+- `LocateAndSpoofTpmEventLog` locates the TCG2 event log and replaces digests in `bootmgfw.efi` events
+- `UpdatePCRDirectly` tries `HashLogExtendEvent` with `EFI_TCG2_EXTEND_ONLY`
+- `ExtendHashToTPM` builds a raw `TPM2_PCR_Extend` command and sends it through `SubmitCommand`
+- `ResetPCRToZero` and `ClearPCRValue` attempt zero-hash extension or PCR reset-like behavior
+- `SynchronizeTPMWithEventLog` comments that PCR extension may fail and that some scenarios may only inspect the event log
+
+These routines should be treated as experimental intent rather than a stable measured boot bypass. Extending zeros does not clear a PCR. `TPM2_PCR_Reset` is not generally available for normal boot PCRs in this context.
+
+#### PeHashCompute.c
+
+This file computes an Authenticode-style SHA-256 hash for the original `bootmgfw.efi`:
+
+- skip PE checksum
+- skip the security directory
+- hash sections by raw file order
+- exclude signature data
+- write the result into `LegitimateBootmgfwHash[32]`
+
+That supports the spoofing idea in `TpmLogSpoofer.c`: compute the legitimate boot manager hash, then use it to replace suspicious event log digests. In the current code, the full `ComputeAndStoreLegitimateBootmgfwHash` to `SpoofTpmEventLog` flow is not fully connected.
+
+#### Anti-Cheat TPM Checks
+
+Useful consistency checks:
+
+- compare PCRs obtained from a TPM quote with PCRs replayed from the TCG event log
+- inspect the number, order, path, digest, device path, image base, and image size of `bootmgfw.efi` events
+- check for zero-filled tails or inconsistent `LastEntry` boundaries in the event log buffer
+- compare `bootmgfw.efi` file timestamps and content with measured boot records
+- look for a timeline where an altered boot manager was measured, then restored, but the log does not contain the corresponding event
+- monitor early boot access to TCG/TCG2 protocol functions, event log buffers, `HashLogExtendEvent`, and `SubmitCommand`
+
+The key detection idea is:
+
+```text
+the altered UEFI boot component was measured
+  -> the project restores the original bootmgfw.efi
+  -> the project edits the event log before StartImage
+  -> Windows or attestation may see a log missing the earlier suspicious measurement
+  -> hardware PCRs and replayed event-log PCRs may diverge
+```
+
+### UEFI Hook Template
+
+`src/bootloader/src/hooks/hooks.c` uses a fixed 14-byte absolute jump template:
+
+```asm
+push low32(target)
+mov dword ptr [rsp+4], high32(target)
+ret
+```
+
+Forensics/detection:
+
+- hooked functions may start with `68 ?? ?? ?? ?? C7 44 24 04 ?? ?? ?? ?? C3`
+- the first 14 bytes of the original function are overwritten
+- the same style appears in early boot hooks and in client-side kernel hook construction
+
+### Hypervisor Core Modules
+
+#### main.cpp
+
+Code: `src/hypervisor/src/main.cpp`
+
+The attachment entry point receives:
+
+- original VM-exit handler address
+- heap base and size
+- UEFI boot image base and size
+- attachment physical base and page count
+- `ntoskrnl.exe` base
+
+It initializes:
+
+- heap manager
+- logs
+- SLAT subsystem
+- CR3 cache
+
+It returns `vmexit_handler_detour`, which becomes the custom handler placed before the original Hyper-V VM-exit handler.
+
+`vmexit_handler_detour` performs:
+
+1. first-exit processing
+2. CR3 cache sampling
+3. VM-exit reason dispatch
+4. CPUID hypercall handling
+5. SLAT violation handling
+6. NMI handling
+7. fallback to the original Hyper-V handler
+
+#### arch
+
+Code: `src/hypervisor/src/arch/`
+
+This is the Intel/AMD abstraction layer.
+
+- Intel path reads and writes VMCS fields.
+- AMD path parses VMCB-related state through a gadget discovered during boot.
+- It exposes guest RIP/RSP/CR3/GS/CS/IDTR, exit reason, RIP advancement, and TLB flush helpers.
+
+`src/hypervisor/src/arch_config.h` defaults to Intel through `_INTELMACHINE`.
+
+#### slat
+
+Code: `src/hypervisor/src/slat/slat.cpp`
+
+This is the second-level address translation layer.
+
+Intel behavior:
+
+- maintains clean and hooked EPT roots
+- deep-copies Hyper-V SLAT structures
+- switches views for hook behavior
+- clears EPT permissions to hide selected physical pages
+
+AMD behavior:
+
+- uses clean and hooked NPT roots
+- tracks clean and hooked ASIDs
+- switches nested translation state for similar view separation
+
+Main capabilities:
+
+- `set_up`
+- `process_first_vmexit`
+- `add_slat_code_hook`
+- `remove_slat_code_hook`
+- `hide_physical_page_from_guest`
+- `try_hide_heap_pages`
+- `process_slat_violation`
+- `map_guest_physical_to_host_physical`
+- `unmap_guest_physical`
+- large-page splitting
+
+Detection surface:
+
+- EPT/NPT roots that do not match normal Hyper-V layout
+- clean/hooked view divergence
+- large pages split into 4 KB pages around hooks
+- GPA to HPA mappings that point into the attachment heap
+- permission-cleared pages used to hide memory from the guest
+
+#### hypercall
+
+Code: `src/hypervisor/src/hypercall/hypercall.cpp`
+
+The hypervisor watches CPUID VM-exits. If register values contain the expected magic keys from `src/common/hypercall/hypercall_def.h`, the exit is interpreted as a custom hypercall. Otherwise execution returns to Hyper-V.
+
+Important keys:
+
+| Field | Value |
+|---|---|
+| Primary key | `0x4E47` |
+| Secondary key | `0x7F` |
+
+Supported operation families include:
+
+- read/write guest physical memory
+- read/write guest virtual memory under a selected CR3
+- translate guest virtual addresses
+- read guest CR3
+- add/remove SLAT code hooks
+- hide guest physical pages
+- flush logs
+- query heap page count
+- enumerate process base/CR3/EPROCESS data
+- allocate/free hidden memory
+- manually call DLL entry points
+- hide/restore hypervisor memory in the PFN database
+- query PFN information
+- get/update `ntoskrnl.exe` base
+- set kernel CR3
+- KPCR-based kernel discovery
+- export discovery
+- CR3 cache control and statistics
+
+This is the main command surface exposed to `client.exe`.
+
+#### hidden memory
+
+The hidden memory flow is implemented inside the hypercall layer. The idea is:
+
+1. accept allocation parameters from the guest
+2. find the target process CR3
+3. reserve guest virtual address space
+4. allocate fake guest physical addresses from a bump allocator
+5. allocate real host physical pages from the attachment heap
+6. map GPA to HPA through SLAT
+7. write page-table entries in the target process
+8. flush the relevant translation state
+9. track the allocation in `g_hidden_memory_list`
+
+Detection ideas:
+
+- target process VAD/PTE/working-set state does not match normal Windows memory manager behavior
+- guest virtual memory maps to GPA ranges that are not backed by normal guest physical memory
+- GPA to HPA translation points into the hypervisor attachment heap
+- PFN database and page-table state disagree
+
+#### memory_manager
+
+Code: `src/hypervisor/src/memory_manager/memory_manager.cpp`
+
+This module handles low-level address translation:
+
+- maps host physical memory into a direct-map region at `255ull << 39`
+- translates guest physical memory through SLAT
+- walks guest page tables for 1 GB, 2 MB, and 4 KB pages
+- translates host virtual addresses
+- reads and writes guest virtual memory across page boundaries
+
+#### memory_management
+
+Code: `src/hypervisor/src/memory_manager/memory_management.cpp`
+
+This is Windows-kernel-specific memory logic:
+
+- resolves `ntoskrnl.exe` exports
+- locates `MmGetVirtualForPhysical`
+- locates `MmGetPhysicalMemoryRanges`
+- pattern-scans `MmGetVirtualForPhysical` to find `MmPfnDatabase`
+- queries `_MMPFN`
+- samples physical pages
+- hides/restores hypervisor pages in the PFN database
+- reports attachment, heap, and UEFI boot image memory ranges
+
+This code is highly Windows-build-sensitive.
+
+#### ntoskrnl_parser
+
+Code: `src/hypervisor/src/memory_manager/ntoskrnl_parser.*`
+
+This module parses PE structures in guest memory:
+
+- DOS header
+- NT header
+- export directory
+- name/ordinal/function tables
+- named exports
+- byte-pattern scans
+
+`find_ntoskrnl_base_dynamically` currently returns 0 to avoid crashes, so the project primarily relies on boot-stage capture or KPCR/IDT-style discovery.
+
+#### cr3_cache
+
+Code: `src/hypervisor/src/cr3_cache/`
+
+The comments explicitly mention bypassing EAC CR3 shuffling. Behavior:
+
+1. sample on VM-exits
+2. check whether guest CPL is 3
+3. read guest GS base + `0x40` to identify `TEB.ClientId.UniqueProcess`
+4. if the PID matches `g_target_pid`, read the current guest CR3
+5. update `g_cached_cr3` and statistics when it changes
+
+Detection surface:
+
+- repeated guest GS/TEB reads from the VM-exit path
+- long-lived CR3 cache for a selected PID
+- CR3 cache log markers `0xC300` through `0xC305`
+
+#### interrupts / apic
+
+Code:
+
+- `src/hypervisor/src/interrupts/`
+- `src/hypervisor/src/apic/`
+
+Purpose:
+
+- initialize xAPIC/x2APIC logic
+- send NMIs to other processors
+- use NMI paths to synchronize SLAT/TLB state
+- set an Intel NMI handler gate
+
+Detection surface:
+
+- unusual NMI broadcasts
+- modified IDT NMI gate
+- APIC ICR writes for NMI delivery
+
+#### logs
+
+Code: `src/hypervisor/src/logs/`
+
+The logging system allocates 64 pages from the heap, appends `trap_frame_log_t` entries, and lets the client flush them with the `fl` command.
+
+Markers include:
+
+| Marker | Meaning |
+|---:|---|
+| `0xC0DE` | hypercall entry |
+| `0xEEE1` - `0xEEE5` | `ntoskrnl` base retrieval |
+| `0xEEE6` - `0xEEE8` | `ntoskrnl` base update |
+| `0xEEE9` - `0xEEEB` | kernel CR3 setting |
+| `0xF000` - `0xF008` | PFN query |
+| `0xC300` - `0xC305` | CR3 cache |
+| `0xE010` - `0xE018` | export resolution |
+
+#### crt / heap_manager
+
+Code:
+
+- `src/hypervisor/src/crt/`
+- `src/hypervisor/src/memory_manager/heap_manager.*`
+
+The attachment cannot rely on a normal CRT, so the project provides:
+
+- memory copy/set/compare helpers
+- basic min/max/swap helpers
+- simple mutex
+- bitmap
+- `chkstk.asm`
+- page-based free-list heap
+
+The heap is the backing allocator for SLAT hooks, hidden memory, logs, and internal runtime state.
+
+### Client User-Mode Controller
+
+#### main and setup
+
+Entry point: `src/client/src/main.cpp`
+
+Flow:
+
+1. call `sys::set_up()`
+2. enter the command loop
+3. parse user commands through `commands::process`
+4. exit on `exit`
+
+`sys::set_up()` in `src/client/src/system/system.cpp`:
+
+- detects CPU vendor
+- calls `hypercall::read_guest_cr3()` to verify that the attachment responds
+- parses `ntoskrnl.exe`
+- parses kernel module information
+- sets up the kernel hook helper
+
+If the attachment is not active, it prints that `hyperv-attachment` does not seem to be loaded.
+
+#### client hypercall wrapper
+
+Code: `src/client/src/hypercall/`
+
+- `vmexit.asm` implements `launch_raw_hypercall` as `cpuid; ret`
+- `hypercall.cpp` builds hypercall structures and wraps them as C++ APIs
+- `hypercall.h` exposes the client-side API
+
+Register convention:
+
+```text
+RCX = hypercall_info_t
+RDX = first argument
+R8  = second argument
+R9  = third argument
+```
+
+#### commands
+
+Code: `src/client/src/commands/commands.cpp`
+
+The command table includes:
+
+| Command | Purpose |
+|---|---|
+| `rgpm` / `wgpm` / `cgpm` | read/write/copy guest physical memory |
+| `gvat` | translate guest virtual address |
+| `rgvm` / `wgvm` / `cgvm` | read/write/copy guest virtual memory |
+| `akh` / `rkh` | add/remove kernel hooks |
+| `hgpp` | hide a guest physical page |
+| `fl` | flush hypervisor logs |
+| `hfpc` | query heap free page count |
+| `lkm` / `kme` / `dkm` | list/query/dump kernel modules |
+| `gva` / `gpb` | get virtual aliases or process bases |
+| `chkmap` | check mapping state |
+| `loaddll` | manual DLL loading experiment |
+| `stealthdll` | hidden-memory DLL loading experiment |
+| `hide_hv_memory` | PFN database hiding experiment |
+| `test_ntoskrnl` / `test_exports` | kernel base/export tests |
+| `pfn_query_demo` | PFN query demo |
+| `cr3_cache` / `cr3_monitor` | CR3 cache controls and monitoring |
+| `vuworld` / `get_world` / `notepad_cr3` | target-specific experiments |
+
+#### system
+
+Code: `src/client/src/system/system.cpp`
+
+This module provides user-mode discovery and helper routines:
+
+- calls `NtQuerySystemInformation`
+- calls `RtlAdjustPrivilege`
+- parses kernel modules
+- dumps kernel modules through hypercalls
+- parses PE exports
+- locates `PsActiveProcessHead`, `PsInitialSystemProcess`, and `MmPhysicalMemoryBlock`
+- finds a kernel executable holder section for detours
+- enumerates processes
+- resolves module exports in target processes
+- allocates locked shadow pages with `VirtualAlloc` and `VirtualLock`
+
+#### hook
+
+Code: `src/client/src/hook/hook.cpp`
+
+This module builds SLAT-backed kernel hooks:
+
+- allocates and locks a shadow page
+- translates the shadow page to a GPA
+- translates the target kernel address to physical memory
+- reads the original page
+- uses Zydis to compute instruction boundaries
+- writes a 14-byte trampoline
+- allocates detour code in the kernel detour holder
+- adds the SLAT code hook
+
+#### dll_loader
+
+Code: `src/client/src/dll_loader/dll_loader.cpp`
+
+This is a manual PE loader used with hidden memory experiments:
+
+- reads DLL file bytes
+- validates PE headers
+- allocates hidden memory through hypercalls
+- maps headers and sections
+- applies relocations
+- resolves imports
+- calls `DllMain` through hypervisor-assisted logic
+
+`tests/basic-test/hello.cpp` is a simple payload for this path. Its `DllMain` writes `C:\temp\dll_log.txt` and shows a message box.
+
+#### Target-Specific Experiments
+
+`commands.cpp` contains target-specific strings and offsets, including references to:
+
+- `VALORANT-Win64-Shipping.exe`
+- `vgk.sys`
+- `UWorld`
+- `ShadowRegionsDataStructure`
+- EAC CR3 shuffling comments
+
+These should be treated as research/debug experiments and also as strong semantic detection indicators.
+
+### src/common
+
+The shared protocol layer contains:
+
+- hypercall magic keys
+- hypercall enum values
+- bitfield structures
+- memory operation structures
+- shared definitions used by both client and hypervisor
+
+Important file:
+
+```text
+src/common/hypercall/hypercall_def.h
+```
+
+Important structure:
+
+```c
+typedef union _hypercall_info_t
+{
+    struct
+    {
+        UINT64 primary_key : 16;
+        UINT64 call_type : 6;
+        UINT64 secondary_key : 7;
+        UINT64 call_reserved_data : 35;
+    } bits;
+    UINT64 flags;
+} hypercall_info_t;
+```
+
+The client and hypervisor must agree on this layout exactly.
+
+### tests/basic-test
+
+This project builds a small DLL used by the loader experiments. It is not a full test suite. It provides a simple payload for validating whether manual or hidden-memory DLL loading reaches `DllMain`.
+
+### external
+
+The `external/` directory appears to contain reference or historical code, especially SLAT-related material. It is useful for comparison but it is not the main build path.
+
+### Build And Environment Notes
+
+The project targets Windows x64.
+
+Main dependencies:
+
+- Visual Studio 2022
+- MSVC v143
+- Windows SDK 10.x
+- MASM build customization
+- EDK2 / VisualUefi-style UEFI dependencies
+- vcpkg
+- `cli11`
+- `zydis`
+
+Notes:
+
+- `hyper.sln` is primarily configured for `Release|x64`.
+- `src/hypervisor/src/arch_config.h` defaults to the Intel path.
+- `src/bootloader/bootloader.vcxproj` contains local VisualUefi/EDK2-style absolute paths.
+- `src/client/client.vcxproj` also contains hardcoded include paths.
+- `src/client/vcpkg.json` declares `zydis` and `cli11`.
+- `src/client/vcpkg_installed/` is local build output and should not be assumed portable.
+
+### Observable Detection Surface
+
+#### Disk / EFI Partition
+
+- `\efi\microsoft\boot\bootmgfw.original.efi`
+- `\efi\microsoft\boot\hyperv-attachment.dll`
+- EFI root `\debug.txt`
+- restored or modified `bootmgfw.efi` timestamps/content
+- `hypervisor.dll` renamed or deployed as `hyperv-attachment.dll`
+
+#### UEFI / Boot Chain Memory
+
+- 14-byte absolute jump templates at bootmgfw/winload/hvloader function entries
+- trampoline code in Hyper-V text code caves
+- loader memory map descriptor changed to reserved
+- UEFI bootloader image zeroed later by the hypervisor
+- attachment heap allocated as runtime services data
+
+#### TPM / Measured Boot
+
+- abnormal number/order/digest/device-path data for `bootmgfw.efi` events
+- mismatch between event-log replay PCRs and TPM quote PCRs
+- zero-filled event log tail after in-memory compaction
+- inconsistent event log `LastEntry` boundaries
+- image base/size fields that do not match normal Windows boot manager behavior
+- EFI file timeline showing replacement/restoration while measured boot logs omit the corresponding event
+
+#### Hyper-V / VM-exit
+
+- original VM-exit handler call redirected to a code cave
+- CPUID exits checking `0x4E47` / `0x7F`
+- extra VM-exit logic for CR3 cache, SLAT violations, and NMI handling
+- Intel clean/hooked EPT roots
+- AMD clean/hooked NPT roots and ASID switching
+
+#### Kernel Address Space
+
+- target process mappings created outside normal Windows memory-management paths
+- GPA to HPA mappings that point into the attachment heap
+- read/write and execute views that differ
+- large pages split into 4 KB pages
+- PFN database state that does not match accessible memory
+- `ntoskrnl` export/pattern scanning
+
+#### User-Mode Process
+
+- `client.exe` uses CPUID as its hypercall entry
+- use of `NtQuerySystemInformation` and `RtlAdjustPrivilege`
+- `VirtualAlloc` + `VirtualLock` for shadow pages
+- linked CLI11 and Zydis usage
+- command names such as `cr3_cache`, `stealthdll`, and `hide_hv_memory`
+
+### Suggested Reading Path
+
+Read these files in order:
+
+1. `src/common/hypercall/hypercall_def.h`
+2. `src/bootloader/src/main.c`
+3. `src/bootloader/src/bootmgfw/bootmgfw.c`
+4. `src/bootloader/src/TpmMeasurementFilter.c`
+5. `src/bootloader/src/TpmLogSpoofer.c`
+6. `src/bootloader/src/PeHashCompute.c`
+7. `src/bootloader/src/winload/winload.c`
+8. `src/bootloader/src/hvloader/hvloader.c`
+9. `src/bootloader/src/hyperv_attachment/hyperv_attachment.c`
+10. `src/hypervisor/src/main.cpp`
+11. `src/hypervisor/src/arch/arch.cpp`
+12. `src/hypervisor/src/slat/slat.cpp`
+13. `src/hypervisor/src/hypercall/hypercall.cpp`
+14. `src/hypervisor/src/memory_manager/memory_manager.cpp`
+15. `src/hypervisor/src/memory_manager/memory_management.cpp`
+16. `src/hypervisor/src/cr3_cache/cr3_cache.cpp`
+17. `src/client/src/hypercall/hypercall.cpp`
+18. `src/client/src/system/system.cpp`
+19. `src/client/src/hook/hook.cpp`
+20. `src/client/src/dll_loader/dll_loader.cpp`
+21. `src/client/src/commands/commands.cpp`
+
+That path connects:
+
+```text
+boot-chain entry
+  -> TPM/TCG event log handling
+  -> PE loading hooks
+  -> Hyper-V VM-exit takeover
+  -> CPUID hypercalls
+  -> SLAT, memory, CR3, and hidden-memory features
+  -> user-mode command surface
+```
+
+### Module-Level Conclusion
+
+- `bootloader` is the entry and boot-chain attachment layer. Focus on EFI files, bootmgfw/winload/hvloader hooks, and TPM event log handling.
+- `hypervisor` is the capability layer. Focus on the VM-exit detour, hypercall dispatch, SLAT view switching, hidden memory, PFN database logic, and CR3 cache.
+- `client` is the control layer. Focus on CPUID hypercalls, the command table, kernel hook construction, manual DLL mapping, and target-specific experiments.
+- `common` is the protocol layer. Focus on magic keys, bitfields, and enum ordering.
+- `external` is reference/history material rather than the main build path.
+
+For anti-cheat analysis, the three most important facts are:
+
+1. The sample enters the Hyper-V VM-exit path before Windows is fully running.
+2. It uses SLAT/EPT/NPT to create different read/write and execute views.
+3. It exposes user-mode commands through CPUID-triggered custom hypercalls.
